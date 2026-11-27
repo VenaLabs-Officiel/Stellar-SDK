@@ -117,14 +117,91 @@ describe('Course content: video embeds', () => {
 
   it.each([
     ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
-    ['https://youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
     ['https://m.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
+    ['https://music.youtube.com/watch?v=dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
     ['https://youtu.be/dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
-    ['https://youtu.be/dQw4w9WgXcQ?t=10', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
     ['https://www.youtube.com/embed/dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
+    ['https://www.youtube.com/shorts/dQw4w9WgXcQ', 'https://www.youtube.com/embed/dQw4w9WgXcQ'],
+    [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL1234567890',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    ],
     ['https://vimeo.com/123456789', 'https://player.vimeo.com/video/123456789'],
     ['https://player.vimeo.com/video/123456789', 'https://player.vimeo.com/video/123456789'],
+    ['https://vimeo.com/channels/staffpicks/123456789', 'https://player.vimeo.com/video/123456789'],
   ])('embeds %s', (videoUrl, expected) => {
+    renderStep(videoStep(videoUrl));
+
+    expect(iframeSrc()).toBe(expected);
+  });
+
+  it.each([
+    [
+      'https://youtube.com/watch?v=dQw4w9WgXcQ&t=42s',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?start=42',
+    ],
+    ['https://youtu.be/dQw4w9WgXcQ?t=10', 'https://www.youtube.com/embed/dQw4w9WgXcQ?start=10'],
+    [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1h2m3s',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?start=3723',
+    ],
+    [
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?start=90',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?start=90',
+    ],
+    // Anything that is not a plain duration is dropped, the video still plays
+    [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t="><script>',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    ],
+    [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&start=-5',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    ],
+    [
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ&autoplay=1&t=5',
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?start=5',
+    ],
+  ])('keeps the start time of %s and nothing else', (videoUrl, expected) => {
+    renderStep(videoStep(videoUrl));
+
+    expect(iframeSrc()).toBe(expected);
+  });
+
+  it.each([
+    [
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    ],
+    [
+      'https://youtube-nocookie.com/embed/dQw4w9WgXcQ?start=30',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=30',
+    ],
+  ])('keeps the privacy-enhanced player of %s', (videoUrl, expected) => {
+    renderStep(videoStep(videoUrl));
+
+    expect(iframeSrc()).toBe(expected);
+  });
+
+  it.each([
+    [
+      'https://player.vimeo.com/video/123456789?h=abc123def4',
+      'https://player.vimeo.com/video/123456789?h=abc123def4',
+    ],
+    [
+      'https://vimeo.com/123456789/abc123def4',
+      'https://player.vimeo.com/video/123456789?h=abc123def4',
+    ],
+    [
+      'https://vimeo.com/123456789?h=abc123def4&autoplay=1',
+      'https://player.vimeo.com/video/123456789?h=abc123def4',
+    ],
+    // A hash that is not alphanumeric is dropped
+    [
+      'https://player.vimeo.com/video/123456789?h="><script>',
+      'https://player.vimeo.com/video/123456789',
+    ],
+  ])('keeps the hash of the unlisted Vimeo video %s', (videoUrl, expected) => {
     renderStep(videoStep(videoUrl));
 
     expect(iframeSrc()).toBe(expected);
@@ -139,6 +216,16 @@ describe('Course content: video embeds', () => {
     ['data:text/html,<script>alert(1)</script>'],
     ['https://www.youtube.com/watch?v=<script>'],
     ['https://www.youtube.com/watch'],
+    // Playlists without a video id cannot be embedded from the id alone
+    ['https://www.youtube.com/playlist?list=PL1234567890'],
+    ['https://www.youtube.com/watch?list=PL1234567890'],
+    ['https://www.youtube.com/embed/videoseries?list=PL1234567890'],
+    ['https://youtube-nocookie.com.evil.example/embed/dQw4w9WgXcQ'],
+    ['https://music.youtube.com.evil.example/watch?v=dQw4w9WgXcQ'],
+    ['https://evil.example/?youtube.com/watch?v=dQw4w9WgXcQ'],
+    ['https://youtube.com@evil.example/watch?v=dQw4w9WgXcQ'],
+    ['https://player.vimeo.com.evil.example/video/123456789?h=abc123def4'],
+    ['https://notvimeo.com/123456789'],
     ['https://vimeo.com/not-a-video'],
     [''],
   ])('does not embed %j', (videoUrl) => {
