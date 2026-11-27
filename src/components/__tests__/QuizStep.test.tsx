@@ -21,6 +21,14 @@ function quizStep(quizContent: Partial<VenalabsQuizContent>): VenalabsCourseStep
   };
 }
 
+/** Validation state shown on an option after the answer was submitted */
+function optionState(option: string): 'correct' | 'incorrect' | 'neutral' {
+  const element = screen.getByText(option).closest('button');
+  if (element?.classList.contains('venalabs-quiz-option--correct')) return 'correct';
+  if (element?.classList.contains('venalabs-quiz-option--incorrect')) return 'incorrect';
+  return 'neutral';
+}
+
 function answer(option: string) {
   fireEvent.click(screen.getByText(option));
   fireEvent.click(screen.getByRole('button', { name: 'Submit Answer' }));
@@ -42,6 +50,10 @@ describe('Quiz step: correctOptionIndex provided by the API', () => {
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(onComplete).toHaveBeenCalledWith({ selectedIndex: 2, correct: true });
     expect(screen.queryByRole('button', { name: 'Try Again' })).not.toBeInTheDocument();
+    // The chosen option is validated, the others are left alone
+    expect(optionState('Option C')).toBe('correct');
+    expect(optionState('Option A')).toBe('neutral');
+    expect(optionState('Option B')).toBe('neutral');
   });
 
   it('rejects any other option and lets the user try again', () => {
@@ -57,12 +69,32 @@ describe('Quiz step: correctOptionIndex provided by the API', () => {
     answer('Option A');
 
     expect(onComplete).not.toHaveBeenCalled();
+    // The wrong option is marked as such, and the right one is not given away
+    expect(optionState('Option A')).toBe('incorrect');
+    expect(optionState('Option C')).toBe('neutral');
+    // No new answer can be submitted before "Try Again"
+    expect(screen.queryByRole('button', { name: 'Submit Answer' })).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+
+    // Back to a clean question
+    expect(optionState('Option A')).toBe('neutral');
+    expect(screen.getByRole('button', { name: 'Submit Answer' })).toBeDisabled();
 
     answer('Option B');
 
     expect(onComplete).not.toHaveBeenCalled();
+    expect(optionState('Option B')).toBe('incorrect');
+    expect(optionState('Option A')).toBe('neutral');
     expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
+
+    // The right answer is still accepted after two wrong ones
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    answer('Option C');
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith({ selectedIndex: 2, correct: true });
+    expect(optionState('Option C')).toBe('correct');
   });
 
   it('shows the explanation after an answer', () => {
@@ -77,6 +109,25 @@ describe('Quiz step: correctOptionIndex provided by the API', () => {
     answer('Option B');
 
     expect(screen.getByText('Because B.')).toBeInTheDocument();
+    expect(screen.getByText('Because B.').parentElement).toHaveClass(
+      'venalabs-quiz-explanation--success'
+    );
+  });
+
+  it('shows the explanation as an error after a wrong answer', () => {
+    render(
+      <StepContent
+        step={quizStep({ correctOptionIndex: 1, explanation: { en: 'Because B.' } })}
+        onComplete={vi.fn()}
+        isCompleted={false}
+      />
+    );
+
+    answer('Option A');
+
+    expect(screen.getByText('Because B.').parentElement).toHaveClass(
+      'venalabs-quiz-explanation--error'
+    );
   });
 });
 

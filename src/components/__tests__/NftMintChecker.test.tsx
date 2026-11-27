@@ -476,11 +476,22 @@ describe('NftMintChecker: transaction confirmation', () => {
   });
 
   it('keeps the transaction valid for 180 seconds', async () => {
+    // The real module, not the mock used by the other tests
+    const actual =
+      await vi.importActual<typeof import('../../utils/mintTiming')>('../../utils/mintTiming');
+
+    expect(actual.MINT_TIMING.txTimeoutSeconds).toBe(180);
+  });
+
+  it('builds the transaction with the configured validity', async () => {
+    // A value that only this test uses: it can only reach
+    // TransactionBuilder.setTimeout through MINT_TIMING
+    mocks.timing.txTimeoutSeconds = 137;
     renderChecker();
     await clickMint();
 
     await screen.findByText('NFT minted successfully!');
-    expect(mocks.txTimeouts).toEqual([180]);
+    expect(mocks.txTimeouts).toEqual([137]);
   });
 
   it('polls while the transaction is pending, then records it once it succeeds', async () => {

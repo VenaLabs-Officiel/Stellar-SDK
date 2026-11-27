@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { UserConfig } from 'vite';
 
 const root = resolve(__dirname, '../..');
 
@@ -27,10 +28,29 @@ describe('package.json', () => {
 });
 
 describe('vite.config.ts', () => {
-  it('does not emit source maps into the published dist folder', () => {
-    const config = readFileSync(resolve(root, 'vite.config.ts'), 'utf-8');
+  it('does not emit source maps into the published dist folder', async () => {
+    // The evaluated configuration, not its source text: a commented-out or
+    // overridden option would not be caught by a text search
+    const { default: config } = (await import('../../vite.config')) as {
+      default: UserConfig;
+    };
 
-    expect(config).toMatch(/sourcemap:\s*false/);
-    expect(config).not.toMatch(/sourcemap:\s*true/);
-  });
+    expect(config.build?.sourcemap).toBe(false);
+  }, 30000);
+
+  it('builds the two published bundles from the package entry', async () => {
+    const { default: config } = (await import('../../vite.config')) as {
+      default: UserConfig;
+    };
+    const lib = config.build?.lib;
+
+    expect(lib).toBeTruthy();
+    if (!lib) return;
+    expect(lib.formats).toEqual(['es', 'umd']);
+    // The file names package.json points to
+    const fileName = lib.fileName as (format: string) => string;
+    const exportsRoot = pkg.exports['.'] as Record<string, string>;
+    expect(`./dist/${fileName('es')}`).toBe(exportsRoot.import);
+    expect(`./dist/${fileName('umd')}`).toBe(exportsRoot.require);
+  }, 30000);
 });
