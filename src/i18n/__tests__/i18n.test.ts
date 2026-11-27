@@ -38,6 +38,19 @@ describe('i18n', () => {
     );
   });
 
+  it('names the two mint follow-up actions differently', () => {
+    const en = createTranslator('en');
+    const fr = createTranslator('fr');
+
+    // Recording a confirmed mint is not the step verification
+    expect(en('nft.retryRecord')).toBe('Record mint again');
+    expect(fr('nft.retryRecord')).toBe('Enregistrer le mint à nouveau');
+    for (const translate of [en, fr]) {
+      expect(translate('nft.retryRecord')).not.toBe(translate('verification.verifyComplete'));
+      expect(translate('nft.retryRecord').toLowerCase()).not.toMatch(/verif|vérif/);
+    }
+  });
+
   it('contains no em dash', () => {
     for (const locale of ['en', 'fr'] as const) {
       for (const text of Object.values(translations[locale])) {

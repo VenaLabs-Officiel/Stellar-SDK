@@ -655,7 +655,7 @@ describe('NftMintChecker: double submission', () => {
 });
 
 describe('NftMintChecker: nft-verify failure after a confirmed mint', () => {
-  it('retries a bounded number of times, then offers to retry the verification', async () => {
+  it('retries a bounded number of times, then offers to record the mint again', async () => {
     let attempts = 0;
     let failing = true;
     server.use(
@@ -682,7 +682,7 @@ describe('NftMintChecker: nft-verify failure after a confirmed mint', () => {
     expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeDisabled();
 
     failing = false;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry verification' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Record mint again' }));
 
     expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
     expect(attempts).toBe(4);

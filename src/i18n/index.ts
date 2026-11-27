@@ -106,8 +106,8 @@ const translations = {
       'The transaction has not been confirmed yet. Do not mint again: check its status first.',
     'nft.checkStatus': 'Check status',
     'nft.mintedNotRecorded':
-      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: retry the verification.',
-    'nft.retryRecord': 'Retry verification',
+      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: record it again.',
+    'nft.retryRecord': 'Record mint again',
     'nft.prerequisitesNotCompleted':
       'Complete the previous courses of the map before minting this NFT.',
 
@@ -237,8 +237,8 @@ const translations = {
       "La transaction n'est pas encore confirmée. Ne mintez pas à nouveau : vérifiez d'abord son statut.",
     'nft.checkStatus': 'Vérifier le statut',
     'nft.mintedNotRecorded':
-      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez la vérification.",
-    'nft.retryRecord': 'Relancer la vérification',
+      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez son enregistrement.",
+    'nft.retryRecord': 'Enregistrer le mint à nouveau',
     'nft.prerequisitesNotCompleted':
       'Terminez les cours précédents de la carte avant de minter ce NFT.',
 
