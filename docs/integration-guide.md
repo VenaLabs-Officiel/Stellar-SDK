@@ -1,6 +1,6 @@
 # VenaLabs Stellar SDK: Integration Guide
 
-This guide shows how to embed VenaLabs Stellar courses in a React application with `@venalabs/stellar-sdk` 2.0.1.
+This guide shows how to embed VenaLabs Stellar courses in a React application with `@venalabs/stellar-sdk` 2.1.0.
 
 ## How it works
 
@@ -132,6 +132,8 @@ With Next.js, render the component from a client component (a file that starts w
 | `className`         | `string`                    | No       | `''`                       | Custom CSS class for the container                      |
 | `baseUrl`           | `string`                    | No       | `https://api.venalabs.com` | API base URL (for testing)                              |
 | `externalWalletKit` | `StellarWalletsKit \| null` | No       | -                          | Existing wallet kit instance                            |
+| `sorobanRpcUrl` | `string` | No | per network | Soroban RPC URL used for NFT minting |
+| `userKey` | `string` | No | - | Identifier of the signed-in user; changing it resets the SDK session |
 
 ## Choosing the network
 

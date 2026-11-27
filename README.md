@@ -4,7 +4,7 @@
 
 Official React SDK for embedding VenaLabs Stellar courses in your website.
 
-This documentation describes version 2.0.1.
+This documentation describes version 2.1.0.
 
 ## Installation
 
@@ -36,7 +36,7 @@ function App() {
 }
 ```
 
-Keep `getAccessToken` referentially stable (wrap it in `useCallback` or define it outside the component): the SDK creates a new API client whenever the identity of this function changes.
+`getAccessToken` does not need to be referentially stable: the SDK always calls the latest function and keeps its API client and cached token across renders. Passing a new function therefore does not switch users. If your application can change the signed-in user without unmounting the component, pass the `userKey` prop: changing it resets the session.
 
 A step-by-step walkthrough is available in the [integration guide](./docs/integration-guide.md).
 
@@ -52,6 +52,8 @@ A step-by-step walkthrough is available in the [integration guide](./docs/integr
 | `className`         | `string`                    | No       | `''`                       | Custom class name for the container                                                                                                      |
 | `baseUrl`           | `string`                    | No       | `https://api.venalabs.com` | Custom API base URL (for testing)                                                                                                        |
 | `externalWalletKit` | `StellarWalletsKit \| null` | No       | -                          | Existing `@creit.tech/stellar-wallets-kit` instance from the host app. When provided, the SDK uses it as is and ignores `stellarNetwork` |
+| `sorobanRpcUrl` | `string` | No | per network | Soroban RPC URL used for NFT minting. Defaults to `https://soroban-testnet.stellar.org` on testnet and `https://mainnet.sorobanrpc.com` on the public network. Must be an `https://` URL (`http://` is accepted for local development only) |
+| `userKey` | `string` | No | - | Identifier of the signed-in user. Changing it resets the SDK session (token, maps, progress, linked wallets). Set it when your application can switch users without unmounting the component. It is never sent to the API |
 
 ## Authentication Flow
 
@@ -212,7 +214,7 @@ The SDK maps the HTTP status returned by the API to one of the error codes below
 | `INVALID_API_KEY`       | The code exists in the SDK and is mapped to HTTP 403. The current API reports an invalid API key with a 401, so that case is reported as `INVALID_TOKEN`                                                            | See `INVALID_TOKEN`                                                                                                                                                                        |
 | `RATE_LIMITED`          | The API answered 429                                                                                                                                                                                                | Reduce the request rate or contact support                                                                                                                                                 |
 | Blank/unstyled screen   | CSS not imported                                                                                                                                                                                                    | Add `import '@venalabs/stellar-sdk/style.css'` to your app                                                                                                                                 |
-| Wallet connection fails | Wrong network                                                                                                                                                                                                       | Ensure `stellarNetwork` matches your wallet's network                                                                                                                                      |
+| Minting is refused because of the network | The wallet is on another network than the course | Switch the wallet to the network of the course (`stellarNetwork`). Linking a wallet only shows a warning; minting is blocked until the networks match |
 
 ## TypeScript Support
 
@@ -255,13 +257,12 @@ The SDK does not hardcode these addresses: the mint voucher returned by the Vena
 
 ## Known limitations
 
-These apply to version 2.0.1.
+These apply to version 2.1.0.
 
 - Supported Stellar checkers: `LINKED`, `BALANCE`, `TRANSACTION` and `NFT_MINT`. Other checker types are not supported.
 - The built-in wallet connection supports Freighter only.
 - Only one map is displayed: the first one returned by the API. When the API returns several maps, the map selector buttons are rendered but selecting another map has no effect.
 - CommonJS is not supported under Node.js: `require('@venalabs/stellar-sdk')` fails with `HTMLElement is not defined` (the `require` entry is a UMD browser build). Use the ESM `import` instead.
-- Minting the NFT on the public network does not work in 2.0.1: the Soroban RPC endpoint built into this version (`https://stellar-soroban-public.nodies.app`) no longer accepts requests. Minting on testnet uses a different endpoint.
 
 ## Roadmap
 
