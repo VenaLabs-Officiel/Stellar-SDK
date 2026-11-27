@@ -121,20 +121,17 @@ const server = setupServer(
   }),
 
   // POST /courses/:courseId/steps/:stepId/complete
-  http.post(
-    `${BASE_URL}/api/v1/sdk/courses/:courseId/steps/:stepId/complete`,
-    ({ request }) => {
-      const apiKey = request.headers.get('X-Api-Key');
-      if (!apiKey) {
-        return HttpResponse.json({ message: 'Invalid API key' }, { status: 403 });
-      }
-
-      return HttpResponse.json({
-        success: true,
-        progress: mockProgress[0],
-      });
+  http.post(`${BASE_URL}/api/v1/sdk/courses/:courseId/steps/:stepId/complete`, ({ request }) => {
+    const apiKey = request.headers.get('X-Api-Key');
+    if (!apiKey) {
+      return HttpResponse.json({ message: 'Invalid API key' }, { status: 403 });
     }
-  ),
+
+    return HttpResponse.json({
+      success: true,
+      progress: mockProgress[0],
+    });
+  }),
 
   // GET /progress
   http.get(`${BASE_URL}/api/v1/sdk/progress`, ({ request }) => {
@@ -380,9 +377,7 @@ describe('VenalabsApiClient', () => {
         baseUrl: BASE_URL,
       });
 
-      await expect(client.completeStep('', 'step-1')).rejects.toThrow(
-        'courseId is required'
-      );
+      await expect(client.completeStep('', 'step-1')).rejects.toThrow('courseId is required');
     });
 
     it('should throw on missing stepId', async () => {
@@ -392,9 +387,7 @@ describe('VenalabsApiClient', () => {
         baseUrl: BASE_URL,
       });
 
-      await expect(client.completeStep('course-1', '')).rejects.toThrow(
-        'stepId is required'
-      );
+      await expect(client.completeStep('course-1', '')).rejects.toThrow('stepId is required');
     });
   });
 
@@ -480,32 +473,30 @@ describe('VenalabsApiError', () => {
     });
 
     it('should return false for non-auth errors', () => {
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.NOT_FOUND, 404, 'test').isAuthError()
-      ).toBe(false);
+      expect(new VenalabsApiError(VenalabsErrorCodes.NOT_FOUND, 404, 'test').isAuthError()).toBe(
+        false
+      );
     });
   });
 
   describe('isRetryable', () => {
     it('should return true for retryable errors', () => {
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.NETWORK_ERROR, 0, 'test').isRetryable()
-      ).toBe(true);
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.TIMEOUT, 0, 'test').isRetryable()
-      ).toBe(true);
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.SERVER_ERROR, 500, 'test').isRetryable()
-      ).toBe(true);
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.RATE_LIMITED, 429, 'test').isRetryable()
-      ).toBe(true);
+      expect(new VenalabsApiError(VenalabsErrorCodes.NETWORK_ERROR, 0, 'test').isRetryable()).toBe(
+        true
+      );
+      expect(new VenalabsApiError(VenalabsErrorCodes.TIMEOUT, 0, 'test').isRetryable()).toBe(true);
+      expect(new VenalabsApiError(VenalabsErrorCodes.SERVER_ERROR, 500, 'test').isRetryable()).toBe(
+        true
+      );
+      expect(new VenalabsApiError(VenalabsErrorCodes.RATE_LIMITED, 429, 'test').isRetryable()).toBe(
+        true
+      );
     });
 
     it('should return false for non-retryable errors', () => {
-      expect(
-        new VenalabsApiError(VenalabsErrorCodes.NOT_FOUND, 404, 'test').isRetryable()
-      ).toBe(false);
+      expect(new VenalabsApiError(VenalabsErrorCodes.NOT_FOUND, 404, 'test').isRetryable()).toBe(
+        false
+      );
     });
   });
 });

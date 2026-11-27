@@ -236,7 +236,7 @@ function VenalabsStellarSDKProvider({
 
   // Wallet linked handler
   const onWalletLinked = useCallback((address: string, network: string) => {
-    setLinkedWallets(prev => ({ ...prev, [network]: address }));
+    setLinkedWallets((prev) => ({ ...prev, [network]: address }));
   }, []);
 
   // Fetch linked wallet helper

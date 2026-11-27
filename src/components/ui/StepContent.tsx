@@ -190,8 +190,8 @@ function BlockRenderer({ block, depth = 0 }: { block: BlockItem; depth?: number 
         level === 1
           ? 'venalabs-heading-1'
           : level === 2
-          ? 'venalabs-heading-2'
-          : 'venalabs-heading-3';
+            ? 'venalabs-heading-2'
+            : 'venalabs-heading-3';
       return (
         <HeadingTag className={headingClass}>
           {block.content?.map((item, i) => (

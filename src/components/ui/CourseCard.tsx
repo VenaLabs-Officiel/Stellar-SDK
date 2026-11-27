@@ -200,12 +200,7 @@ export function CourseCard({
       {/* Image Section with Overlay */}
       <div className="venalabs-course-card__image-container">
         {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={title}
-            loading="lazy"
-            className="venalabs-course-card__image"
-          />
+          <img src={imageUrl} alt={title} loading="lazy" className="venalabs-course-card__image" />
         ) : (
           <div className="venalabs-course-card__image-placeholder">
             <div className="venalabs-course-card__image-emoji">📚</div>

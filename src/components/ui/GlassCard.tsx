@@ -127,11 +127,7 @@ export function GlassBadge({ children, className, variant = 'default' }: GlassBa
     error: 'venalabs-badge venalabs-badge--error',
   };
 
-  return (
-    <span className={cn(variantStyles[variant], className)}>
-      {children}
-    </span>
-  );
+  return <span className={cn(variantStyles[variant], className)}>{children}</span>;
 }
 
 // ============================================
@@ -487,9 +483,18 @@ export function ImageView({ url, alt = 'Image', className }: ImageViewProps) {
   }, [url]);
 
   return (
-    <div className={cn('venalabs-image-view', !imageLoaded && 'venalabs-image-view--loading', className)}>
+    <div
+      className={cn(
+        'venalabs-image-view',
+        !imageLoaded && 'venalabs-image-view--loading',
+        className
+      )}
+    >
       <img
-        className={cn('venalabs-image-view__img', imageLoaded && 'venalabs-image-view__img--loaded')}
+        className={cn(
+          'venalabs-image-view__img',
+          imageLoaded && 'venalabs-image-view__img--loaded'
+        )}
         onLoad={() => setImageLoaded(true)}
         onError={() => setImageError(true)}
         loading="lazy"

@@ -96,7 +96,15 @@ export function WalletLinker({
     }
 
     setLinking(false);
-  }, [stellarAddress, apiClient, signMessage, network, onWalletLinked, setLinkedWalletForNetwork, t]);
+  }, [
+    stellarAddress,
+    apiClient,
+    signMessage,
+    network,
+    onWalletLinked,
+    setLinkedWalletForNetwork,
+    t,
+  ]);
 
   // Format address for display
   const formatAddress = (address: string) => {

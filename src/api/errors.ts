@@ -81,16 +81,20 @@ export class VenalabsApiError extends Error {
   /**
    * Create error from HTTP response
    */
-  static fromResponse(status: number, body?: { code?: number; type?: string; message?: string }): VenalabsApiError {
+  static fromResponse(
+    status: number,
+    body?: { code?: number; type?: string; message?: string }
+  ): VenalabsApiError {
     // Map status codes to error codes
     let code: VenalabsErrorCode;
     let message: string;
 
     switch (status) {
       case 401:
-        code = body?.type === 'TOKEN_EXPIRED'
-          ? VenalabsErrorCodes.TOKEN_EXPIRED
-          : VenalabsErrorCodes.INVALID_TOKEN;
+        code =
+          body?.type === 'TOKEN_EXPIRED'
+            ? VenalabsErrorCodes.TOKEN_EXPIRED
+            : VenalabsErrorCodes.INVALID_TOKEN;
         message = body?.message || 'Authentication failed';
         break;
       case 403:

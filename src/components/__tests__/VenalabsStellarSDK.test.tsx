@@ -67,10 +67,7 @@ const mockCourse: VenalabsCourse = {
       order: 1,
       quizContent: {
         question: { en: 'What is Web3?', fr: "Qu'est-ce que le Web3?" },
-        options: [
-          { text: { en: 'A web framework' } },
-          { text: { en: 'Decentralized internet' } },
-        ],
+        options: [{ text: { en: 'A web framework' } }, { text: { en: 'Decentralized internet' } }],
         correctOptionIndex: 1,
       },
     },
