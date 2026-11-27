@@ -50,6 +50,17 @@ const RECORD_MINT_RETRY_DELAY_MS = 1000;
 
 type MintPhase = 'idle' | 'preparing' | 'signing' | 'confirming';
 
+/**
+ * Result of recording a confirmed mint on the backend (nft-verify):
+ * - RECORDED: done
+ * - FAILED: could not be done for now (network, 5xx, 429): worth another try
+ * - REFUSED: the backend answered 400 or 409, another try would get the same answer
+ */
+type RecordOutcome = 'RECORDED' | 'FAILED' | 'REFUSED';
+
+/** HTTP statuses of nft-verify that will not change if the call is repeated */
+const RECORD_REFUSED_STATUSES = [400, 409];
+
 /** A submitted transaction and the end of its validity (seconds since the epoch) */
 interface SubmittedTx {
   hash: string;
@@ -143,6 +154,8 @@ export function NftMintChecker({
   // The simulation failed although the voucher is still PENDING: the NFT may
   // have been minted already (other tab, other browser), so verifying is offered
   const [mintMayExist, setMintMayExist] = useState(false);
+  // The backend refused for good to record the confirmed mint (400 / 409)
+  const [recordRefused, setRecordRefused] = useState(false);
 
   // Verify states
   const [verifying, setVerifying] = useState(false);
@@ -210,6 +223,7 @@ export function NftMintChecker({
     setPendingTx(null);
     setUnrecordedHash(null);
     setMintMayExist(false);
+    setRecordRefused(false);
     setResumedKey(null);
     setVerifying(false);
     setVerificationError(null);
@@ -257,24 +271,27 @@ export function NftMintChecker({
   // Record a confirmed mint on the backend. nft-verify is idempotent for the
   // same transaction hash, so a bounded retry is safe.
   const recordMint = useCallback(
-    async (hash: string): Promise<boolean> => {
+    async (hash: string): Promise<RecordOutcome> => {
       for (let attempt = 1; attempt <= RECORD_MINT_ATTEMPTS; attempt++) {
         try {
           await apiClient.verifyNftMint(courseId, stepId, hash);
-          return true;
+          return 'RECORDED';
         } catch (error) {
           console.error(
             `[NftMintChecker] Failed to record the mint (attempt ${attempt}/${RECORD_MINT_ATTEMPTS}):`,
             error
           );
+          if (error instanceof VenalabsApiError && RECORD_REFUSED_STATUSES.includes(error.status)) {
+            return 'REFUSED';
+          }
           const retryable = !(error instanceof VenalabsApiError) || error.isRetryable();
           if (!retryable || attempt === RECORD_MINT_ATTEMPTS) {
-            return false;
+            return 'FAILED';
           }
           await sleep(RECORD_MINT_RETRY_DELAY_MS * attempt);
         }
       }
-      return false;
+      return 'FAILED';
     },
     [apiClient, courseId, stepId]
   );
@@ -285,19 +302,24 @@ export function NftMintChecker({
       const { hash } = tx;
       if (outcome === 'SUCCESS') {
         // The backend is only told about a mint that is confirmed on-chain
-        const recorded = await recordMint(hash);
+        const recordOutcome = await recordMint(hash);
         // Remembered until it is recorded, even if this component is gone
-        if (recorded && tx.storageKey) {
+        if (recordOutcome === 'RECORDED' && tx.storageKey) {
           clearPendingMint(tx.storageKey);
         }
         update(() => {
           setPendingTx(null);
           setTxHash(hash);
-          if (recorded) {
+          if (recordOutcome === 'RECORDED') {
             setUnrecordedHash(null);
+            setRecordRefused(false);
             setMintSuccess(true);
           } else {
+            // Minted but not recorded. After a definitive refusal, recording
+            // again is pointless: the step is completed through its
+            // verification, which detects the mint on-chain.
             setUnrecordedHash(hash);
+            setRecordRefused(recordOutcome === 'REFUSED');
           }
         });
         return;
@@ -900,16 +922,20 @@ export function NftMintChecker({
             <div className="venalabs-warning-banner">
               <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
               <div>
-                <p>{t('nft.mintedNotRecorded')}</p>
+                <p>
+                  {recordRefused ? t('nft.mintedVerifyToComplete') : t('nft.mintedNotRecorded')}
+                </p>
                 {renderTransactionLink(unrecordedHash)}
-                <GlassButton
-                  variant="secondary"
-                  onClick={() => void handleRetryRecord()}
-                  disabled={mintLoading}
-                >
-                  {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
-                  {t('nft.retryRecord')}
-                </GlassButton>
+                {!recordRefused && (
+                  <GlassButton
+                    variant="secondary"
+                    onClick={() => void handleRetryRecord()}
+                    disabled={mintLoading}
+                  >
+                    {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
+                    {t('nft.retryRecord')}
+                  </GlassButton>
+                )}
               </div>
             </div>
           )}

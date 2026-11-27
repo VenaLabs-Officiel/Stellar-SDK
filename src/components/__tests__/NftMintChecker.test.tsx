@@ -709,6 +709,87 @@ describe('NftMintChecker: nft-verify failure after a confirmed mint', () => {
   });
 });
 
+describe('NftMintChecker: nft-verify refused for good after a confirmed mint', () => {
+  const REFUSED_MESSAGE =
+    'Your NFT was minted on-chain. Do not mint again: verify to complete the step.';
+
+  function refuseRecording(status: number, message: string) {
+    const calls = { count: 0 };
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/nft-verify`, () => {
+        calls.count++;
+        return HttpResponse.json({ status, message }, { status });
+      })
+    );
+    return calls;
+  }
+
+  it.each([
+    [409, 'Voucher already minted with another transaction'],
+    [400, 'Voucher network does not match the checker'],
+  ])('does not loop on recording after a %i: it offers to verify', async (status, message) => {
+    const calls = refuseRecording(status, message);
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: true })
+      )
+    );
+    const onVerificationSuccess = vi.fn();
+    renderChecker({ onVerificationSuccess });
+    await clickMint();
+
+    expect(await screen.findByText(REFUSED_MESSAGE)).toBeInTheDocument();
+    // A definitive answer is not retried, and no retry is offered
+    expect(calls.count).toBe(1);
+    expect(screen.queryByRole('button', { name: 'Record mint again' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Minting failed/)).not.toBeInTheDocument();
+    // Minting again would replay a used voucher
+    expect(screen.getByRole('button', { name: 'Minted!' })).toBeDisabled();
+
+    // The backend detects the mint on-chain when the step is verified
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
+    expect(await screen.findByText('Verification passed!')).toBeInTheDocument();
+    await waitFor(() => expect(onVerificationSuccess).toHaveBeenCalledTimes(1));
+    expect(calls.count).toBe(1);
+  });
+
+  it('stops offering "Record mint again" once a retry is refused for good', async () => {
+    let status = 500;
+    let attempts = 0;
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/nft-verify`, () => {
+        attempts++;
+        return HttpResponse.json({ status, message: 'boom' }, { status });
+      })
+    );
+    renderChecker();
+    await clickMint();
+    await screen.findByText(/Your NFT was minted on-chain, but the mint could not be recorded/);
+    expect(attempts).toBe(3);
+
+    status = 409;
+    fireEvent.click(screen.getByRole('button', { name: 'Record mint again' }));
+
+    expect(await screen.findByText(REFUSED_MESSAGE)).toBeInTheDocument();
+    expect(attempts).toBe(4);
+    expect(screen.queryByRole('button', { name: 'Record mint again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
+  });
+
+  it('shows the same way out after a reload, without looping', async () => {
+    const calls = refuseRecording(409, 'Voucher is not pending');
+    storePendingMint();
+    renderChecker();
+
+    expect(await screen.findByText(REFUSED_MESSAGE)).toBeInTheDocument();
+    expect(calls.count).toBe(1);
+    expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Record mint again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
+  });
+});
+
 describe('NftMintChecker: verifying with a mint that is not recorded', () => {
   it('completes the step when nft-verify keeps failing, and forgets the stored transaction', async () => {
     server.use(
