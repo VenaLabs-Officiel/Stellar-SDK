@@ -1,28 +1,51 @@
 name: Publish to npm
 
+# Publishes with npm Trusted Publishing (OIDC): no npm token is stored in the
+# repository. The package must list this workflow file as a trusted publisher
+# on npmjs.com. See https://docs.npmjs.com/trusted-publishers
+
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+  id-token: write # required for the OIDC exchange with the npm registry
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Trusted Publishing needs npm >= 11.5.1 and Node >= 22.14.0.
+      # Node 22 still bundles npm 10, Node 24 bundles npm 11.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
+
+      - name: Verify tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PACKAGE_VERSION}"
+            exit 1
+          fi
+
+      - name: Verify npm supports Trusted Publishing
+        run: |
+          NPM_VERSION="$(npm --version)"
+          echo "npm ${NPM_VERSION}"
+          if [ "$(printf '%s\n' "11.5.1" "$NPM_VERSION" | sort -V | head -n 1)" != "11.5.1" ]; then
+            echo "::error::npm >= 11.5.1 is required for Trusted Publishing (found ${NPM_VERSION})"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -33,10 +56,21 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Run tests
+        run: npm test
+
       - name: Build
         run: npm run build
 
+      # Pre-releases (versions with a hyphen, e.g. 2.1.0-rc.1) go to the
+      # "next" dist-tag so they never become the default install.
+      # Provenance is attached automatically by Trusted Publishing.
       - name: Publish to npm
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          case "$PACKAGE_VERSION" in
+            *-*) DIST_TAG=next ;;
+            *) DIST_TAG=latest ;;
+          esac
+          echo "Publishing ${PACKAGE_VERSION} with dist-tag ${DIST_TAG}"
+          npm publish --access public --tag "$DIST_TAG"
