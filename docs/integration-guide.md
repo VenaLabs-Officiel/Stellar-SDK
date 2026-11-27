@@ -55,29 +55,33 @@ router.get('/venalabs-token', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const response = await fetch('https://api.venalabs.com/api/v1/sdk/auth/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': process.env.VENALABS_API_KEY,
-      'X-Api-Secret': process.env.VENALABS_API_SECRET,
-    },
-    body: JSON.stringify({ userId: String(req.user.id) }),
-  });
+  try {
+    const response = await fetch('https://api.venalabs.com/api/v1/sdk/auth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': process.env.VENALABS_API_KEY,
+        'X-Api-Secret': process.env.VENALABS_API_SECRET,
+      },
+      body: JSON.stringify({ userId: String(req.user.id) }),
+    });
 
-  if (!response.ok) {
-    return res.status(502).json({ error: 'Could not get a VenaLabs token' });
+    if (!response.ok) {
+      return res.status(502).json({ error: 'Could not get a VenaLabs token' });
+    }
+
+    // The API answers { token, expiresIn }
+    const data = await response.json();
+    res.json({ token: data.token });
+  } catch {
+    res.status(502).json({ error: 'Could not reach the VenaLabs API' });
   }
-
-  // The API answers { token, expiresIn }
-  const data = await response.json();
-  res.json({ token: data.token });
 });
 
 module.exports = router;
 ```
 
-Mount the router so that the endpoint is reachable at `/api/venalabs-token` (for example `app.use('/api', router)`). The built-in `fetch` requires Node.js 18 or later.
+`req.user` stands for whatever your own authentication sets: how the user is identified is up to you. Mount the router so that the endpoint is reachable at `/api/venalabs-token` (for example `app.use('/api', router)`). The built-in `fetch` requires Node.js 18 or later.
 
 ## Step 3: Render the SDK
 
@@ -170,19 +174,19 @@ The `className` prop adds a class to the SDK container.
 
 The SDK displays an error view when a request fails. Errors thrown by the API client are `VenalabsApiError` instances with one of these codes:
 
-| Code              | When                                                                   |
-| ----------------- | ---------------------------------------------------------------------- |
-| `INVALID_TOKEN`   | The API answered 401, even after the SDK called `getAccessToken` again |
-| `TOKEN_EXPIRED`   | The API reported an expired token                                      |
-| `INVALID_API_KEY` | The API answered 403                                                   |
-| `NOT_FOUND`       | The API answered 404                                                   |
-| `RATE_LIMITED`    | The API answered 429                                                   |
-| `SERVER_ERROR`    | The API answered with a 5xx status                                     |
-| `NETWORK_ERROR`   | The request could not reach the API                                    |
-| `TIMEOUT`         | The request timed out (30 seconds by default)                          |
-| `UNKNOWN`         | Any other failed response                                              |
+| Code              | When                                                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_TOKEN`   | The API answered 401, even after the SDK called `getAccessToken` again. The API answers 401 for a missing, invalid or inactive API key, and for an invalid or expired token                                         |
+| `TOKEN_EXPIRED`   | Only produced when a 401 response body contains `type: "TOKEN_EXPIRED"`. The current API does not send that field, so an expired token is reported as `INVALID_TOKEN` once the automatic refresh attempt has failed |
+| `INVALID_API_KEY` | The code exists in the SDK and is mapped to HTTP 403. The current API reports an invalid API key with a 401, so that case is reported as `INVALID_TOKEN`                                                            |
+| `NOT_FOUND`       | The API answered 404                                                                                                                                                                                                |
+| `RATE_LIMITED`    | The API answered 429                                                                                                                                                                                                |
+| `SERVER_ERROR`    | The API answered with a 5xx status                                                                                                                                                                                  |
+| `NETWORK_ERROR`   | The request could not reach the API                                                                                                                                                                                 |
+| `TIMEOUT`         | The request timed out (30 seconds by default)                                                                                                                                                                       |
+| `UNKNOWN`         | Any other failed response                                                                                                                                                                                           |
 
-If you get `INVALID_TOKEN`, check that `apiKey` is active, that the token was created with the same API key, and that `getAccessToken` returns the `token` string itself.
+If you get `INVALID_TOKEN`, check the API key in your VenaLabs dashboard, check that the token was created with the same API key, and make sure `getAccessToken` returns a fresh `token` string each time it is called.
 
 ## Security checklist
 
