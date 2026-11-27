@@ -150,20 +150,23 @@ export type CheckerNetworkResolution =
   | { supported: false; network: string };
 
 /**
- * Resolve the network a checker runs on: the network of the checker itself,
- * otherwise the `stellarNetwork` prop (default: TESTNET). A network the SDK
- * does not handle is reported, never replaced.
+ * Resolve the network a checker runs on: the network of the checker itself
+ * (compared without regard to case or surrounding spaces), otherwise the
+ * `stellarNetwork` prop (default: TESTNET). A network the SDK does not handle
+ * is reported, never replaced.
  */
 export function resolveCheckerNetwork(
   checker: VenalabsChecker,
   fallback: StellarNetwork = DEFAULT_STELLAR_NETWORK
 ): CheckerNetworkResolution {
   const configured = getCheckerConfigNetwork(checker);
-  if (!configured) {
+  // Tolerate a different case or stray spaces in the back-office value
+  const normalized = typeof configured === 'string' ? configured.trim().toUpperCase() : '';
+  if (!configured || normalized === '') {
     return { supported: true, network: toCheckerNetwork(fallback) };
   }
-  if (isStellarCheckerNetwork(configured)) {
-    return { supported: true, network: configured };
+  if (isStellarCheckerNetwork(normalized)) {
+    return { supported: true, network: normalized };
   }
   return { supported: false, network: configured };
 }

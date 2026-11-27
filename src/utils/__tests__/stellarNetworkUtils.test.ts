@@ -149,6 +149,27 @@ describe('Stellar network: single source of truth', () => {
     });
   });
 
+  it('normalises the case and surrounding spaces of a checker network', () => {
+    expect(
+      resolveCheckerNetwork(checker({ linkedConfig: { network: 'stellar_public' } }), 'TESTNET')
+    ).toEqual({ supported: true, network: 'STELLAR_PUBLIC' });
+    expect(
+      resolveCheckerNetwork(
+        checker({ type: 'NFT_MINT', nftMintConfig: { network: ' Stellar_Testnet ' } }),
+        'PUBLIC'
+      )
+    ).toEqual({ supported: true, network: 'STELLAR_TESTNET' });
+    // A blank network is no network: the stellarNetwork prop applies
+    expect(resolveCheckerNetwork(checker({ linkedConfig: { network: '   ' } }), 'PUBLIC')).toEqual({
+      supported: true,
+      network: 'STELLAR_PUBLIC',
+    });
+    // Still strict: a network that only looks similar is reported as unsupported
+    expect(
+      resolveCheckerNetwork(checker({ linkedConfig: { network: 'stellar_futurenet' } }), 'PUBLIC')
+    ).toEqual({ supported: false, network: 'stellar_futurenet' });
+  });
+
   it('reports an unknown checker network instead of replacing it', () => {
     expect(
       resolveCheckerNetwork(checker({ linkedConfig: { network: 'HYPERLIQUID_MAINNET' } }), 'PUBLIC')
