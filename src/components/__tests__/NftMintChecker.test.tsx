@@ -773,6 +773,30 @@ describe('NftMintChecker: checks before signing', () => {
   });
 });
 
+describe('NftMintChecker: completion delay after verification', () => {
+  it('leaves no timer behind and does not lose the completion when unmounted during the delay', async () => {
+    api.voucher = pendingVoucher({ status: 'MINTED', txHash: TX_HASH });
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: true })
+      )
+    );
+    const onVerificationSuccess = vi.fn();
+    const { unmount } = renderChecker({ onVerificationSuccess });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Verify & Complete' }));
+    expect(await screen.findByText('Verification passed!')).toBeInTheDocument();
+    expect(onVerificationSuccess).not.toHaveBeenCalled();
+
+    // The user leaves the step before the 500 ms delay has elapsed
+    unmount();
+
+    expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('NftMintChecker: voucher loading', () => {
   it('does not apply the voucher of a previous step to the current one', async () => {
     let releaseSlowVoucher: () => void = () => {};

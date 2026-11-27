@@ -259,6 +259,62 @@ describe('Wallet linking: signing network', () => {
   });
 });
 
+describe('Verification success: completion delay', () => {
+  function renderVerified() {
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: true, message: 'All good' })
+      )
+    );
+    const onVerificationSuccess = vi.fn();
+    const view = render(
+      <CheckerVerification
+        apiClient={
+          new VenalabsApiClient({
+            apiKey: 'test-key',
+            getAccessToken: () => Promise.resolve('test-token'),
+            baseUrl: BASE_URL,
+          })
+        }
+        courseId="course-1"
+        stepId="step-1"
+        checker={makeChecker()}
+        isCompleted={false}
+        linkedWalletAddress={USER_ADDRESS}
+        onWalletLinked={vi.fn()}
+        onVerificationSuccess={onVerificationSuccess}
+      />
+    );
+    return { onVerificationSuccess, ...view };
+  }
+
+  it('completes the step shortly after the verification passed', async () => {
+    const { onVerificationSuccess } = renderVerified();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
+
+    expect(await screen.findByText('All good')).toBeInTheDocument();
+    expect(onVerificationSuccess).not.toHaveBeenCalled();
+    await waitFor(() => expect(onVerificationSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it('leaves no timer behind and does not lose the completion when unmounted during the delay', async () => {
+    const { onVerificationSuccess, unmount } = renderVerified();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
+    expect(await screen.findByText('All good')).toBeInTheDocument();
+
+    // The user leaves the step before the 500 ms delay has elapsed
+    unmount();
+
+    // The step was verified: its completion is sent at once, not dropped
+    expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    // ... and the cleared timer does not fire a second time
+    expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('VenalabsStellarSDK: stellarNetwork prop', () => {
   it('shows an explicit error for an unknown value instead of using testnet', () => {
     render(

@@ -31,6 +31,7 @@ import {
 import { MINT_TIMING } from '../../utils/mintTiming';
 import { sleep } from '../../utils/sleep';
 import { RpcTimeoutError, withTimeout } from '../../utils/withTimeout';
+import { useDeferredCall } from '../../utils/useDeferredCall';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -147,6 +148,9 @@ export function NftMintChecker({
       isMountedRef.current = false;
     };
   }, []);
+
+  // Delay before the step is completed; cleared (and run at once) on unmount
+  const deferCall = useDeferredCall();
 
   // Step for which a mint operation is running (prevents a second submission)
   const mintInFlightRef = useRef<string | null>(null);
@@ -584,9 +588,7 @@ export function NftMintChecker({
 
       if (result.passed) {
         setVerificationSuccess(true);
-        setTimeout(() => {
-          onVerificationSuccess();
-        }, 500);
+        deferCall(onVerificationSuccess, 500);
       } else {
         setVerificationError(result.message || t('nft.verificationFailedNft'));
       }
@@ -596,7 +598,7 @@ export function NftMintChecker({
     }
 
     setVerifying(false);
-  }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
+  }, [apiClient, courseId, stepId, onVerificationSuccess, deferCall, t]);
 
   // Get Stellar explorer URL
   const getExplorerUrl = (hash: string) => {

@@ -255,6 +255,88 @@ describe('StellarWalletProvider: connect', () => {
   });
 });
 
+describe('StellarWalletProvider: unmount', () => {
+  function renderWithUnmount(kit: FakeKit) {
+    const ref: { current: StellarWalletContextValue | null } = { current: null };
+    function Probe() {
+      ref.current = useStellarWallet();
+      return null;
+    }
+    const { unmount } = render(
+      <StellarWalletProvider externalKit={kit as unknown as StellarWalletsKit}>
+        <Probe />
+      </StellarWalletProvider>
+    );
+    return { wallet: () => ref.current!, unmount };
+  }
+
+  it('releases a pending connect() when the provider unmounts while the modal is open', async () => {
+    const { kit, modal } = createFakeKit();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { wallet, unmount } = renderWithUnmount(kit);
+    await waitFor(() => expect(wallet().isInitialized).toBe(true));
+
+    let connecting!: Promise<string | null>;
+    act(() => {
+      connecting = wallet().connect();
+    });
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    expect(useWalletStore.getState().isConnecting).toBe(true);
+
+    // The host removes the SDK while the wallet modal is still open
+    unmount();
+
+    const outcome = await Promise.race([
+      connecting,
+      new Promise<string>((resolve) => setTimeout(() => resolve('still pending'), 200)),
+    ]);
+    expect(outcome).toBeNull();
+    // The shared store is not left on "Connecting..." for the next mount
+    expect(useWalletStore.getState().isConnecting).toBe(false);
+    expect(useWalletStore.getState().connectionError).toBeNull();
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    // A late answer of the modal is ignored
+    modal.callbacks!.onWalletSelected({ id: 'freighter' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(kit.setWallet).not.toHaveBeenCalled();
+    expect(kit.getAddress).not.toHaveBeenCalled();
+    expect(useWalletStore.getState().stellarAddress).toBeNull();
+    errorSpy.mockRestore();
+  });
+
+  it('does not leave the network timeout timer behind once the wallet has answered', async () => {
+    const { kit } = createFakeKit();
+    const { wallet } = renderWithUnmount(kit);
+    await waitFor(() => expect(wallet().isInitialized).toBe(true));
+
+    vi.useFakeTimers();
+    try {
+      await expect(wallet().getWalletNetwork()).resolves.toMatchObject({ network: 'TESTNET' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still gives up after 3 s when the wallet never reports its network', async () => {
+    const { kit } = createFakeKit();
+    kit.getNetwork.mockImplementation(() => new Promise(() => {}));
+    const { wallet } = renderWithUnmount(kit);
+    await waitFor(() => expect(wallet().isInitialized).toBe(true));
+
+    vi.useFakeTimers();
+    try {
+      const pending = wallet().getWalletNetwork();
+      await vi.advanceTimersByTimeAsync(3000);
+      await expect(pending).resolves.toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('StellarWalletProvider: disconnect', () => {
   it('resets the wallet state and handles a rejected kit.disconnect()', async () => {
     const { kit, modal } = createFakeKit();

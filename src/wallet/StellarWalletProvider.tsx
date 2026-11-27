@@ -134,6 +134,17 @@ export function StellarWalletProvider({
   // Connection in progress, shared by concurrent callers so that a single
   // modal is opened
   const connectPromiseRef = useRef<Promise<string | null> | null>(null);
+  // Ends the connection in progress as if the modal had been closed
+  const cancelConnectRef = useRef<(() => void) | null>(null);
+
+  // The modal may still be open when the provider unmounts: release the
+  // pending connect() so callers are not left waiting and the shared store
+  // does not stay on "connecting" for the next mount
+  useEffect(() => {
+    return () => {
+      cancelConnectRef.current?.();
+    };
+  }, []);
 
   // Connect wallet
   const connect = useCallback((): Promise<string | null> => {
@@ -153,9 +164,16 @@ export function StellarWalletProvider({
     // user has chosen a wallet: wait for one of its two callbacks instead.
     const selection = new Promise<string>((resolve, reject) => {
       let walletSelected = false;
+      let cancelled = false;
+      cancelConnectRef.current = () => {
+        cancelled = true;
+        reject(new WalletModalClosedError());
+      };
       Promise.resolve(
         kit.openModal({
           onWalletSelected: (option: { id: string }) => {
+            // The provider is gone: a late selection must not touch the wallet
+            if (cancelled) return;
             walletSelected = true;
             try {
               kit.setWallet(option.id);
@@ -193,6 +211,7 @@ export function StellarWalletProvider({
       )
       .finally(() => {
         connectPromiseRef.current = null;
+        cancelConnectRef.current = null;
         setIsConnecting(false);
       });
 
@@ -252,10 +271,13 @@ export function StellarWalletProvider({
       return null;
     }
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const reported = await Promise.race([
         kit.getNetwork(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), WALLET_NETWORK_TIMEOUT_MS)),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), WALLET_NETWORK_TIMEOUT_MS);
+        }),
       ]);
       if (!reported?.networkPassphrase) {
         return null;
@@ -265,6 +287,8 @@ export function StellarWalletProvider({
       // Not every wallet module can report its network
       console.warn('[StellarWalletProvider] Could not read the wallet network:', error);
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   }, [kit]);
 

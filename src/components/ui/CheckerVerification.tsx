@@ -18,6 +18,7 @@ import {
   getCheckerConfigNetwork,
   toCheckerNetwork,
 } from '../../utils/stellarNetworkUtils';
+import { useDeferredCall } from '../../utils/useDeferredCall';
 
 /** Checker types this SDK version can verify */
 const SUPPORTED_CHECKER_TYPES: readonly string[] = ['LINKED', 'BALANCE', 'TRANSACTION', 'NFT_MINT'];
@@ -90,6 +91,9 @@ export function CheckerVerification({
     details?: Record<string, string>;
   } | null>(null);
 
+  // Delay before the step is completed; cleared (and run at once) on unmount
+  const deferCall = useDeferredCall();
+
   // Declared before the NFT_MINT early return so hooks run in the same order on every render
   const handleVerify = useCallback(async () => {
     setVerifying(true);
@@ -105,9 +109,7 @@ export function CheckerVerification({
           message: result.message || t('verification.passed'),
           details: result.details,
         });
-        setTimeout(() => {
-          onVerificationSuccess();
-        }, 500);
+        deferCall(onVerificationSuccess, 500);
       } else {
         setVerificationError(result.message || t('verification.checkRequirements'));
       }
@@ -116,7 +118,7 @@ export function CheckerVerification({
     }
 
     setVerifying(false);
-  }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
+  }, [apiClient, courseId, stepId, onVerificationSuccess, deferCall, t]);
 
   // A checker type added to the platform after this SDK version: say so
   // instead of offering Stellar wallet actions that cannot satisfy it
