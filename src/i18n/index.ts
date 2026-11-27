@@ -81,6 +81,23 @@ const translations = {
     'nft.minting': 'Minting...',
     'nft.minted': 'Minted!',
     'nft.mintNft': 'Mint NFT',
+    'nft.confirming': 'Confirming...',
+    'nft.transactionFailedOnChain': 'The mint transaction failed on-chain. Please try again.',
+    'nft.transactionExpired':
+      'The transaction expired before it was included in a ledger. Nothing was minted. Please try again.',
+    'nft.networkBusy':
+      'The Stellar network is busy and did not accept the transaction. Please try again in a moment.',
+    'nft.simulationFailed': 'The mint transaction could not be prepared. Please try again later.',
+    'nft.voucherAlreadyUsed':
+      'This mint voucher has already been used on-chain. If the NFT is in your wallet, please contact support.',
+    'nft.recipientMismatch':
+      'This NFT is reserved for wallet {address}. Connect and link that wallet, then try again.',
+    'nft.unconfirmed':
+      'The transaction has not been confirmed yet. Do not mint again: check its status first.',
+    'nft.checkStatus': 'Check status',
+    'nft.mintedNotRecorded':
+      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: retry the verification.',
+    'nft.retryRecord': 'Retry verification',
 
     // Step content
     'stepContent.unknownStepType': 'Unknown step type: ',
@@ -175,6 +192,24 @@ const translations = {
     'nft.minting': 'Mint en cours...',
     'nft.minted': 'Minté !',
     'nft.mintNft': 'Minter le NFT',
+    'nft.confirming': 'Confirmation...',
+    'nft.transactionFailedOnChain': 'La transaction de mint a échoué on-chain. Veuillez réessayer.',
+    'nft.transactionExpired':
+      "La transaction a expiré avant d'être incluse dans un ledger. Rien n'a été minté. Veuillez réessayer.",
+    'nft.networkBusy':
+      "Le réseau Stellar est saturé et n'a pas accepté la transaction. Veuillez réessayer dans un instant.",
+    'nft.simulationFailed':
+      "La transaction de mint n'a pas pu être préparée. Veuillez réessayer plus tard.",
+    'nft.voucherAlreadyUsed':
+      'Ce voucher de mint a déjà été utilisé on-chain. Si le NFT est dans votre portefeuille, veuillez contacter le support.',
+    'nft.recipientMismatch':
+      'Ce NFT est réservé au portefeuille {address}. Connectez et liez ce portefeuille, puis réessayez.',
+    'nft.unconfirmed':
+      "La transaction n'est pas encore confirmée. Ne mintez pas à nouveau : vérifiez d'abord son statut.",
+    'nft.checkStatus': 'Vérifier le statut',
+    'nft.mintedNotRecorded':
+      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez la vérification.",
+    'nft.retryRecord': 'Relancer la vérification',
 
     // Step content
     'stepContent.unknownStepType': "Type d'étape inconnu : ",

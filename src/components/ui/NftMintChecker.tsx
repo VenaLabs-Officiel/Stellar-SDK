@@ -3,7 +3,7 @@
  * Handles the complete NFT minting flow: voucher → mint → verify
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, AlertCircle, CheckCircle2, ExternalLink, Wallet } from 'lucide-react';
 import { useStellarWallet } from '../../wallet';
 import { useTranslation } from '../../i18n';
@@ -19,10 +19,31 @@ import {
   getNetworkPassphrase,
   getExplorerUrl as getExplorerUrlUtil,
 } from '../../utils/stellarNetworkUtils';
+import {
+  submitTransaction,
+  waitForTransaction,
+  SorobanSubmitError,
+  type SorobanReader,
+  type SorobanTxOutcome,
+} from '../../utils/sorobanTx';
+import { MINT_TIMING } from '../../utils/mintTiming';
+import { sleep } from '../../utils/sleep';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+/** Attempts made to record a confirmed mint on the backend (nft-verify) */
+const RECORD_MINT_ATTEMPTS = 3;
+const RECORD_MINT_RETRY_DELAY_MS = 1000;
+
+type MintPhase = 'idle' | 'preparing' | 'signing' | 'confirming';
+
+/** A submitted transaction and the end of its validity (seconds since the epoch) */
+interface SubmittedTx {
+  hash: string;
+  expiresAtSec: number;
 }
 
 export interface NftMintCheckerProps {
@@ -49,11 +70,18 @@ export interface NftMintCheckerProps {
   sorobanRpcUrl?: string;
 }
 
+// Format address for display
+function formatAddress(address: string): string {
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
 /**
  * Component for handling NFT minting flow in courses
  * Flow:
  * 1. User connects and links wallet
- * 2. User clicks Mint -> fetches voucher -> builds and signs tx -> submits
+ * 2. User clicks Mint -> fetches voucher -> builds, simulates and signs the
+ *    transaction -> submits it -> waits for its on-chain confirmation ->
+ *    records the mint on the backend
  * 3. User clicks Verify to complete the step
  */
 export function NftMintChecker({
@@ -74,9 +102,14 @@ export function NftMintChecker({
 
   // Mint states
   const [mintLoading, setMintLoading] = useState(false);
+  const [mintPhase, setMintPhase] = useState<MintPhase>('idle');
   const [mintSuccess, setMintSuccess] = useState(false);
   const [mintError, setMintError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  // Submitted transaction whose final status could not be read yet
+  const [pendingTx, setPendingTx] = useState<SubmittedTx | null>(null);
+  // Transaction confirmed on-chain that the backend has not recorded yet
+  const [unrecordedHash, setUnrecordedHash] = useState<string | null>(null);
 
   // Verify states
   const [verifying, setVerifying] = useState(false);
@@ -86,6 +119,21 @@ export function NftMintChecker({
   // Voucher state
   const [voucherLoading, setVoucherLoading] = useState(true);
   const [voucherData, setVoucherData] = useState<VenalabsNftVoucherResponse | null>(null);
+
+  // Guards against state updates after unmount or for a step that is no longer shown
+  const stepKey = `${courseId}:${stepId}`;
+  const stepKeyRef = useRef(stepKey);
+  stepKeyRef.current = stepKey;
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Step for which a mint operation is running (prevents a second submission)
+  const mintInFlightRef = useRef<string | null>(null);
 
   // Get network from checker config
   const checkerNetwork = checker.nftMintConfig?.network || 'STELLAR_PUBLIC';
@@ -101,42 +149,137 @@ export function NftMintChecker({
   const isConnectedWithMintedWallet = stellarAddress === mintedByAddress;
   const canVerifyMinted = isConnectedWithMintedWallet && isWalletConnected && isWalletLinked;
 
+  // A different step starts from a clean state
+  useEffect(() => {
+    setVoucherData(null);
+    setMintLoading(false);
+    setMintPhase('idle');
+    setMintSuccess(false);
+    setMintError(null);
+    setTxHash(null);
+    setPendingTx(null);
+    setUnrecordedHash(null);
+    setVerifying(false);
+    setVerificationError(null);
+    setVerificationSuccess(false);
+  }, [stepKey]);
+
   // Load voucher on mount to check mint status
   useEffect(() => {
-    const loadVoucher = async () => {
-      if (isCompleted) {
-        setVoucherLoading(false);
-        return;
-      }
+    if (isCompleted) {
+      setVoucherLoading(false);
+      return;
+    }
 
-      setVoucherLoading(true);
-      try {
-        const response = await apiClient.getNftVoucher(courseId, stepId);
+    // Ignore the answer once the step changed or the component unmounted
+    let cancelled = false;
+    setVoucherLoading(true);
+
+    apiClient
+      .getNftVoucher(courseId, stepId)
+      .then((response) => {
+        if (cancelled) return;
         setVoucherData(response);
         // If already minted, set the states
         if (response.status === 'MINTED') {
           setMintSuccess(true);
           setTxHash(response.txHash || null);
         }
-      } catch (error) {
+      })
+      .catch((error) => {
+        if (cancelled) return;
         console.error('[NftMintChecker] Failed to load voucher:', error);
-      }
-      setVoucherLoading(false);
-    };
+      })
+      .finally(() => {
+        if (!cancelled) setVoucherLoading(false);
+      });
 
-    void loadVoucher();
+    return () => {
+      cancelled = true;
+    };
   }, [apiClient, courseId, stepId, isCompleted]);
+
+  // Record a confirmed mint on the backend. nft-verify is idempotent for the
+  // same transaction hash, so a bounded retry is safe.
+  const recordMint = useCallback(
+    async (hash: string): Promise<boolean> => {
+      for (let attempt = 1; attempt <= RECORD_MINT_ATTEMPTS; attempt++) {
+        try {
+          await apiClient.verifyNftMint(courseId, stepId, hash);
+          return true;
+        } catch (error) {
+          console.error(
+            `[NftMintChecker] Failed to record the mint (attempt ${attempt}/${RECORD_MINT_ATTEMPTS}):`,
+            error
+          );
+          const retryable = !(error instanceof VenalabsApiError) || error.isRetryable();
+          if (!retryable || attempt === RECORD_MINT_ATTEMPTS) {
+            return false;
+          }
+          await sleep(RECORD_MINT_RETRY_DELAY_MS * attempt);
+        }
+      }
+      return false;
+    },
+    [apiClient, courseId, stepId]
+  );
+
+  // Apply the final (or still unknown) result of a submitted transaction
+  const settleTransaction = useCallback(
+    async (outcome: SorobanTxOutcome, tx: SubmittedTx, update: (fn: () => void) => void) => {
+      const { hash } = tx;
+      if (outcome === 'SUCCESS') {
+        // The backend is only told about a mint that is confirmed on-chain
+        const recorded = await recordMint(hash);
+        update(() => {
+          setPendingTx(null);
+          setTxHash(hash);
+          if (recorded) {
+            setUnrecordedHash(null);
+            setMintSuccess(true);
+          } else {
+            setUnrecordedHash(hash);
+          }
+        });
+        return;
+      }
+
+      update(() => {
+        if (outcome === 'FAILED') {
+          setPendingTx(null);
+          setMintError(t('nft.transactionFailedOnChain'));
+        } else if (outcome === 'EXPIRED') {
+          setPendingTx(null);
+          setMintError(t('nft.transactionExpired'));
+        } else {
+          // Status unknown: keep the transaction so it can be checked again
+          setPendingTx(tx);
+        }
+      });
+    },
+    [recordMint, t]
+  );
 
   // Handle mint
   const handleMint = useCallback(async () => {
     if (!stellarAddress || !canMintOrVerify) return;
 
+    // A voucher can only be used once: never run two mints for the same step
+    const key = stepKey;
+    if (mintInFlightRef.current === key) return;
+    mintInFlightRef.current = key;
+
+    const isActive = () => isMountedRef.current && stepKeyRef.current === key;
+    const update = (fn: () => void) => {
+      if (isActive()) fn();
+    };
+
     setMintLoading(true);
+    setMintPhase('preparing');
     setMintError(null);
 
     try {
       // 1. Get voucher
-      console.log('[NftMintChecker] Step 1: Fetching voucher...');
       let voucher: VenalabsNftVoucherResponse;
       try {
         voucher = await apiClient.getNftVoucher(courseId, stepId);
@@ -145,29 +288,37 @@ export function NftMintChecker({
         if (voucherError instanceof VenalabsApiError) {
           // Handle specific error types
           if (voucherError.code === 'NOT_FOUND') {
-            setMintError(t('nft.linkWalletFirst'));
+            update(() => setMintError(t('nft.linkWalletFirst')));
           } else {
-            setMintError(t('nft.failedVoucher'));
+            update(() => setMintError(t('nft.failedVoucher')));
           }
         } else {
-          setMintError(t('nft.failedVoucher'));
+          update(() => setMintError(t('nft.failedVoucher')));
         }
-        setMintLoading(false);
         return;
       }
+      if (!isActive()) return;
 
       // Check if already minted
       if (voucher.status === 'MINTED') {
         setMintSuccess(true);
         setTxHash(voucher.txHash || null);
-        setMintLoading(false);
         return;
       }
 
-      // 2. Build and submit transaction using Stellar SDK
-      console.log('[NftMintChecker] Step 2: Building transaction...');
+      // The contract requires the authorization of the voucher recipient
+      if (voucher.recipient !== stellarAddress) {
+        setMintError(
+          t('nft.recipientMismatch', { address: formatAddress(voucher.recipient || '') })
+        );
+        return;
+      }
+      if (!voucher.signature) {
+        setMintError(t('nft.failedVoucher'));
+        return;
+      }
 
-      // Dynamic import of Stellar SDK
+      // 2. Build transaction using Stellar SDK (dynamic import)
       const {
         TransactionBuilder,
         Operation,
@@ -185,7 +336,6 @@ export function NftMintChecker({
         allowHttp: rpcEndpoint.allowHttp,
       });
 
-      console.log('[NftMintChecker] Fetching account for:', stellarAddress);
       const userAccount = await RpcServer.getAccount(stellarAddress);
 
       // Convert signature from hex string to Bytes (64 bytes for Ed25519)
@@ -204,6 +354,7 @@ export function NftMintChecker({
       }
 
       // Build transaction with mint_with_voucher function
+      const builtAtMs = Date.now();
       const tx = new TransactionBuilder(userAccount, {
         fee: BASE_FEE,
         networkPassphrase: passphrase,
@@ -221,59 +372,154 @@ export function NftMintChecker({
             ],
           })
         )
-        .setTimeout(30)
+        .setTimeout(MINT_TIMING.txTimeoutSeconds)
         .build();
 
       // 3. Simulate transaction
-      console.log('[NftMintChecker] Step 3: Simulating transaction...');
       const simResponse = await RpcServer.simulateTransaction(tx);
-      const assembledTx = StellarRpc.assembleTransaction(tx, simResponse).build();
-
-      // 4. Sign via wallet
-      console.log('[NftMintChecker] Step 4: Opening wallet for signing...');
-      const signedTxXdr = await signTransaction(assembledTx.toXDR(), passphrase);
-      const signedTx = new Transaction(signedTxXdr, passphrase);
-
-      // 5. Submit transaction
-      console.log('[NftMintChecker] Step 5: Submitting transaction...');
-      const result = await RpcServer.sendTransaction(signedTx);
-
-      if (result.status === 'ERROR') {
-        setMintError(t('nft.transactionFailed'));
-        setMintLoading(false);
+      if (StellarRpc.Api.isSimulationError(simResponse)) {
+        console.error('[NftMintChecker] Simulation failed:', simResponse.error);
+        const alreadyUsed = String(simResponse.error).includes('Nonce already used');
+        update(() =>
+          setMintError(alreadyUsed ? t('nft.voucherAlreadyUsed') : t('nft.simulationFailed'))
+        );
         return;
       }
+      const assembledTx = StellarRpc.assembleTransaction(tx, simResponse).build();
 
-      // 6. Mark as minted on backend
-      console.log('[NftMintChecker] Step 6: Marking as minted on backend...');
+      // Do not open the wallet for a step the user has already left
+      if (!isActive()) return;
+
+      // 4. Sign via wallet
+      setMintPhase('signing');
+      const signedTxXdr = await signTransaction(assembledTx.toXDR(), passphrase);
+      const signedTx = new Transaction(signedTxXdr, passphrase);
+      const hash = signedTx.hash().toString('hex');
+
+      // From here the transaction may reach the network: the flow runs to its
+      // end even if the component unmounts, so a confirmed mint is recorded.
+      update(() => setMintPhase('confirming'));
+
+      // 5. Submit transaction
       try {
-        await apiClient.verifyNftMint(courseId, stepId, result.hash);
-      } catch (err) {
-        console.warn('[NftMintChecker] Failed to mark as minted:', err);
-        // Don't fail the UI - the tx was successful
+        await submitTransaction(RpcServer, signedTx);
+      } catch (submitError) {
+        if (submitError instanceof SorobanSubmitError) {
+          console.error('[NftMintChecker] Submission failed:', submitError);
+          update(() =>
+            setMintError(
+              submitError.reason === 'BUSY' ? t('nft.networkBusy') : t('nft.transactionFailed')
+            )
+          );
+          return;
+        }
+        throw submitError;
       }
 
-      setTxHash(result.hash);
-      setMintSuccess(true);
-      console.log('[NftMintChecker] Success! TxHash:', result.hash);
+      // 6. Wait for the on-chain result: sendTransaction only queues the transaction
+      const maxTime = Number(signedTx.timeBounds?.maxTime);
+      const expiresAtSec =
+        Number.isFinite(maxTime) && maxTime > 0
+          ? maxTime
+          : Math.ceil(builtAtMs / 1000) + MINT_TIMING.txTimeoutSeconds;
+      const outcome = await waitForTransaction(RpcServer, hash, {
+        deadline: expiresAtSec * 1000 + MINT_TIMING.confirmationGraceMs,
+        expiresAtSec,
+      });
+
+      // 7. Mark as minted on backend, only once the transaction is confirmed
+      await settleTransaction(outcome, { hash, expiresAtSec }, update);
     } catch (error: unknown) {
       console.error('[NftMintChecker] Error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setMintError(t('nft.mintingFailed', { error: errorMessage }));
+      update(() => setMintError(t('nft.mintingFailed', { error: errorMessage })));
+    } finally {
+      if (mintInFlightRef.current === key) {
+        mintInFlightRef.current = null;
+      }
+      update(() => {
+        setMintLoading(false);
+        setMintPhase('idle');
+      });
     }
-
-    setMintLoading(false);
   }, [
     stellarAddress,
     canMintOrVerify,
     apiClient,
     courseId,
     stepId,
+    stepKey,
     signTransaction,
+    settleTransaction,
     t,
     checkerNetwork,
     rpcUrlOverride,
   ]);
+
+  // Check again a submitted transaction whose status is still unknown
+  const handleCheckPending = useCallback(async () => {
+    if (!pendingTx) return;
+
+    const key = stepKey;
+    if (mintInFlightRef.current === key) return;
+    mintInFlightRef.current = key;
+
+    const update = (fn: () => void) => {
+      if (isMountedRef.current && stepKeyRef.current === key) fn();
+    };
+
+    setMintLoading(true);
+    setMintPhase('confirming');
+    setMintError(null);
+
+    try {
+      const { rpc: StellarRpc } = await import('@stellar/stellar-sdk');
+      const rpcEndpoint = resolveSorobanRpc(checkerNetwork, rpcUrlOverride);
+      const reader: SorobanReader = new StellarRpc.Server(rpcEndpoint.url, {
+        allowHttp: rpcEndpoint.allowHttp,
+      });
+
+      // A single poll: once the transaction has expired, any readable answer is final
+      const outcome = await waitForTransaction(reader, pendingTx.hash, {
+        deadline: Date.now(),
+        expiresAtSec: pendingTx.expiresAtSec,
+      });
+      await settleTransaction(outcome, pendingTx, update);
+    } catch (error) {
+      console.error('[NftMintChecker] Status check failed:', error);
+    } finally {
+      if (mintInFlightRef.current === key) {
+        mintInFlightRef.current = null;
+      }
+      update(() => {
+        setMintLoading(false);
+        setMintPhase('idle');
+      });
+    }
+  }, [pendingTx, stepKey, checkerNetwork, rpcUrlOverride, settleTransaction]);
+
+  // Retry recording a mint that is confirmed on-chain
+  const handleRetryRecord = useCallback(async () => {
+    if (!unrecordedHash) return;
+
+    const key = stepKey;
+    if (mintInFlightRef.current === key) return;
+    mintInFlightRef.current = key;
+
+    const update = (fn: () => void) => {
+      if (isMountedRef.current && stepKeyRef.current === key) fn();
+    };
+
+    setMintLoading(true);
+    try {
+      await settleTransaction('SUCCESS', { hash: unrecordedHash, expiresAtSec: 0 }, update);
+    } finally {
+      if (mintInFlightRef.current === key) {
+        mintInFlightRef.current = null;
+      }
+      update(() => setMintLoading(false));
+    }
+  }, [unrecordedHash, stepKey, settleTransaction]);
 
   // Handle verify
   const handleVerify = useCallback(async () => {
@@ -305,10 +551,22 @@ export function NftMintChecker({
     return getExplorerUrlUtil(checkerNetwork, hash);
   };
 
-  // Format address for display
-  const formatAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
+  const renderTransactionLink = (hash: string) => (
+    <a
+      href={getExplorerUrl(hash)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="venalabs-link venalabs-link--external"
+    >
+      <ExternalLink className="venalabs-icon-sm" />
+      <span>
+        {t('nft.viewTransaction')} {formatAddress(hash)}
+      </span>
+    </a>
+  );
+
+  // The mint is done on-chain as soon as the transaction is confirmed
+  const mintDone = mintSuccess || !!unrecordedHash;
 
   return (
     <div className="venalabs-nft-mint-checker">
@@ -377,19 +635,7 @@ export function NftMintChecker({
                   {t('nft.mintedBy')} {formatAddress(mintedByAddress || '')}
                 </span>
               </div>
-              {txHash && (
-                <a
-                  href={getExplorerUrl(txHash)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="venalabs-link venalabs-link--external"
-                >
-                  <ExternalLink className="venalabs-icon-sm" />
-                  <span>
-                    {t('nft.viewTransaction')} {formatAddress(txHash)}
-                  </span>
-                </a>
-              )}
+              {txHash && renderTransactionLink(txHash)}
             </div>
           </div>
 
@@ -447,6 +693,44 @@ export function NftMintChecker({
             </div>
           )}
 
+          {/* Submitted transaction whose status is still unknown */}
+          {pendingTx && (
+            <div className="venalabs-warning-banner">
+              <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
+              <div>
+                <p>{t('nft.unconfirmed')}</p>
+                {renderTransactionLink(pendingTx.hash)}
+                <GlassButton
+                  variant="secondary"
+                  onClick={() => void handleCheckPending()}
+                  disabled={mintLoading}
+                >
+                  {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
+                  {t('nft.checkStatus')}
+                </GlassButton>
+              </div>
+            </div>
+          )}
+
+          {/* Minted on-chain, not recorded by the backend yet */}
+          {unrecordedHash && (
+            <div className="venalabs-warning-banner">
+              <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
+              <div>
+                <p>{t('nft.mintedNotRecorded')}</p>
+                {renderTransactionLink(unrecordedHash)}
+                <GlassButton
+                  variant="secondary"
+                  onClick={() => void handleRetryRecord()}
+                  disabled={mintLoading}
+                >
+                  {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
+                  {t('nft.retryRecord')}
+                </GlassButton>
+              </div>
+            </div>
+          )}
+
           {/* Mint success */}
           {mintSuccess && txHash && (
             <div className="venalabs-success-banner venalabs-success-banner--with-details">
@@ -455,17 +739,7 @@ export function NftMintChecker({
                 <p className="venalabs-font-medium">{t('nft.nftMintedSuccess')}</p>
               </div>
               <div className="venalabs-success-banner__content">
-                <a
-                  href={getExplorerUrl(txHash)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="venalabs-link venalabs-link--external"
-                >
-                  <ExternalLink className="venalabs-icon-sm" />
-                  <span>
-                    {t('nft.viewTransaction')} {formatAddress(txHash)}
-                  </span>
-                </a>
+                {renderTransactionLink(txHash)}
               </div>
             </div>
           )}
@@ -496,10 +770,18 @@ export function NftMintChecker({
             <GlassButton
               variant="secondary"
               onClick={() => void handleMint()}
-              disabled={mintLoading || !canMintOrVerify || mintSuccess}
+              disabled={mintLoading || !canMintOrVerify || mintDone || !!pendingTx}
             >
-              {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
-              {mintLoading ? t('nft.minting') : mintSuccess ? t('nft.minted') : t('nft.mintNft')}
+              {mintLoading && !mintDone && (
+                <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />
+              )}
+              {mintDone
+                ? t('nft.minted')
+                : mintLoading
+                  ? mintPhase === 'confirming'
+                    ? t('nft.confirming')
+                    : t('nft.minting')
+                  : t('nft.mintNft')}
             </GlassButton>
 
             {/* Verify button */}
