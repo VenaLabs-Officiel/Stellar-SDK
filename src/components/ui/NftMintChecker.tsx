@@ -16,6 +16,8 @@ import { getLocalizedText } from '../../types';
 import { useSdkConfig } from '../../utils/sdkConfig';
 import {
   resolveSorobanRpc,
+  resolveCheckerNetwork,
+  findWalletNetworkMismatch,
   getNetworkPassphrase,
   getExplorerUrl as getExplorerUrlUtil,
 } from '../../utils/stellarNetworkUtils';
@@ -98,7 +100,13 @@ export function NftMintChecker({
   const { t, locale } = useTranslation();
   const sdkConfig = useSdkConfig();
   const rpcUrlOverride = sorobanRpcUrl ?? sdkConfig.sorobanRpcUrl;
-  const { stellarAddress, isConnected, signTransaction } = useStellarWallet();
+  const {
+    stellarAddress,
+    isConnected,
+    signTransaction,
+    getWalletNetwork,
+    network: configuredNetwork,
+  } = useStellarWallet();
 
   // Mint states
   const [mintLoading, setMintLoading] = useState(false);
@@ -135,8 +143,10 @@ export function NftMintChecker({
   // Step for which a mint operation is running (prevents a second submission)
   const mintInFlightRef = useRef<string | null>(null);
 
-  // Get network from checker config
-  const checkerNetwork = checker.nftMintConfig?.network || 'STELLAR_PUBLIC';
+  // The network comes from the checker, otherwise from the stellarNetwork prop
+  const networkResolution = resolveCheckerNetwork(checker, configuredNetwork);
+  const checkerNetwork = networkResolution.network;
+  const isNetworkSupported = networkResolution.supported;
 
   // Wallet state checks
   const isWalletConnected = isConnected;
@@ -166,7 +176,7 @@ export function NftMintChecker({
 
   // Load voucher on mount to check mint status
   useEffect(() => {
-    if (isCompleted) {
+    if (isCompleted || !isNetworkSupported) {
       setVoucherLoading(false);
       return;
     }
@@ -197,7 +207,7 @@ export function NftMintChecker({
     return () => {
       cancelled = true;
     };
-  }, [apiClient, courseId, stepId, isCompleted]);
+  }, [apiClient, courseId, stepId, isCompleted, isNetworkSupported]);
 
   // Record a confirmed mint on the backend. nft-verify is idempotent for the
   // same transaction hash, so a bounded retry is safe.
@@ -262,7 +272,7 @@ export function NftMintChecker({
 
   // Handle mint
   const handleMint = useCallback(async () => {
-    if (!stellarAddress || !canMintOrVerify) return;
+    if (!stellarAddress || !canMintOrVerify || !isNetworkSupported) return;
 
     // A voucher can only be used once: never run two mints for the same step
     const key = stepKey;
@@ -317,6 +327,18 @@ export function NftMintChecker({
         setMintError(t('nft.failedVoucher'));
         return;
       }
+
+      // Do not build or sign anything while the wallet is set to another network
+      const walletNetwork = await findWalletNetworkMismatch(getWalletNetwork, checkerNetwork);
+      if (walletNetwork) {
+        update(() =>
+          setMintError(
+            t('wallet.networkMismatch', { actual: walletNetwork, expected: checkerNetwork })
+          )
+        );
+        return;
+      }
+      if (!isActive()) return;
 
       // 2. Build transaction using Stellar SDK (dynamic import)
       const {
@@ -445,6 +467,8 @@ export function NftMintChecker({
   }, [
     stellarAddress,
     canMintOrVerify,
+    isNetworkSupported,
+    getWalletNetwork,
     apiClient,
     courseId,
     stepId,
@@ -548,7 +572,7 @@ export function NftMintChecker({
 
   // Get Stellar explorer URL
   const getExplorerUrl = (hash: string) => {
-    return getExplorerUrlUtil(checkerNetwork, hash);
+    return isNetworkSupported ? getExplorerUrlUtil(checkerNetwork, hash) : '#';
   };
 
   const renderTransactionLink = (hash: string) => (
@@ -593,8 +617,16 @@ export function NftMintChecker({
         </div>
       </div>
 
+      {/* A network the SDK does not handle: explicit message, no wallet action */}
+      {!isNetworkSupported && (
+        <div className="venalabs-error-banner">
+          <AlertCircle className="venalabs-icon-md venalabs-text-error" />
+          <p>{t('verification.unsupportedNetwork', { network: checkerNetwork })}</p>
+        </div>
+      )}
+
       {/* Wallet section */}
-      {!isCompleted && (
+      {isNetworkSupported && !isCompleted && (
         <WalletLinker
           apiClient={apiClient}
           network={checkerNetwork}
@@ -612,7 +644,7 @@ export function NftMintChecker({
       )}
 
       {/* Loading state */}
-      {!isCompleted && voucherLoading && (
+      {isNetworkSupported && !isCompleted && voucherLoading && (
         <div className="venalabs-loading-state">
           <Loader2 className="venalabs-icon-md venalabs-animate-spin venalabs-text-primary" />
           <p>{t('nft.loadingNftStatus')}</p>
@@ -620,7 +652,7 @@ export function NftMintChecker({
       )}
 
       {/* Already Minted state (not yet verified) */}
-      {!isCompleted && !voucherLoading && isAlreadyMinted && (
+      {isNetworkSupported && !isCompleted && !voucherLoading && isAlreadyMinted && (
         <div className="venalabs-nft-already-minted">
           {/* Minted info card */}
           <div className="venalabs-success-banner venalabs-success-banner--with-details">
@@ -683,7 +715,7 @@ export function NftMintChecker({
       )}
 
       {/* Mint/Verify section (not yet minted) */}
-      {!isCompleted && !voucherLoading && !isAlreadyMinted && (
+      {isNetworkSupported && !isCompleted && !voucherLoading && !isAlreadyMinted && (
         <div className={cn('venalabs-nft-mint-section', !canMintOrVerify && 'venalabs-opacity-50')}>
           {/* Mint error */}
           {mintError && (

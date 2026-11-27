@@ -203,6 +203,7 @@ beforeEach(() => {
     disconnect: vi.fn(),
     signMessage: vi.fn(),
     signTransaction: vi.fn().mockResolvedValue('signed-xdr'),
+    getWalletNetwork: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -641,5 +642,66 @@ describe('NftMintChecker: voucher loading', () => {
 
     expect(screen.queryByText('NFT already minted!')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeInTheDocument();
+  });
+});
+
+describe('NftMintChecker: network', () => {
+  const PUBLIC_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+  const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
+
+  it('signs with the passphrase of the checker network', async () => {
+    api.voucher = pendingVoucher({ network: 'STELLAR_PUBLIC' });
+    mocks.wallet.current.network = 'PUBLIC';
+    renderChecker({}, 'STELLAR_PUBLIC');
+    await clickMint();
+
+    await screen.findByText('NFT minted successfully!');
+    expect(mocks.wallet.current.signTransaction).toHaveBeenCalledWith(
+      'assembled-xdr',
+      PUBLIC_PASSPHRASE
+    );
+    expect(mocks.signedWith).toEqual([PUBLIC_PASSPHRASE]);
+  });
+
+  it('uses the stellarNetwork prop when the checker has no network (default: testnet)', async () => {
+    mocks.wallet.current.network = 'TESTNET';
+    renderChecker({
+      checker: { ...makeChecker(), nftMintConfig: undefined },
+    });
+    await clickMint();
+
+    await screen.findByText('NFT minted successfully!');
+    expect(mocks.serverCtor).toHaveBeenCalledWith('https://soroban-testnet.stellar.org', {
+      allowHttp: false,
+    });
+    expect(mocks.signedWith).toEqual([TESTNET_PASSPHRASE]);
+  });
+
+  it('does not sign when the wallet is set to another network', async () => {
+    mocks.wallet.current.getWalletNetwork = vi
+      .fn()
+      .mockResolvedValue({ network: 'PUBLIC', networkPassphrase: PUBLIC_PASSPHRASE });
+    renderChecker();
+    await clickMint();
+
+    expect(
+      await screen.findByText(
+        'Your wallet is set to another network (PUBLIC). Switch it to STELLAR_TESTNET, then try again.'
+      )
+    ).toBeInTheDocument();
+    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+    expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('shows an explicit error and no mint button for an unknown network', async () => {
+    renderChecker({}, 'STELLAR_FUTURENET');
+
+    expect(
+      await screen.findByText(
+        /network \(STELLAR_FUTURENET\) that is not supported in this SDK version/
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
+    expect(api.voucherCalls).toBe(0);
   });
 });

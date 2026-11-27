@@ -14,14 +14,24 @@ import {
 } from 'react';
 import type { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit';
 import { useWalletStore } from '../store';
+import {
+  DEFAULT_STELLAR_NETWORK,
+  type StellarNetwork,
+  type WalletNetworkInfo,
+} from '../utils/stellarNetworkUtils';
 
-export type StellarNetwork = 'TESTNET' | 'PUBLIC';
+export type { StellarNetwork };
+
+/** Time allowed for the wallet to report its network before the check is skipped */
+const WALLET_NETWORK_TIMEOUT_MS = 3000;
 
 export interface StellarWalletContextValue {
   /** The wallet kit instance */
   kit: StellarWalletsKit | null;
   /** Whether the wallet kit is initialized */
   isInitialized: boolean;
+  /** Stellar network the SDK is configured for (the `stellarNetwork` prop) */
+  network: StellarNetwork;
   /** The currently connected wallet address */
   stellarAddress: string | null;
   /** Whether wallet is connected */
@@ -36,6 +46,11 @@ export interface StellarWalletContextValue {
   signMessage: (message: string, networkPassphrase: string) => Promise<string>;
   /** Sign a transaction XDR */
   signTransaction: (xdr: string, networkPassphrase: string) => Promise<string>;
+  /**
+   * Network currently selected in the user's wallet, or null when the wallet
+   * cannot report it
+   */
+  getWalletNetwork: () => Promise<WalletNetworkInfo | null>;
 }
 
 const StellarWalletContext = createContext<StellarWalletContextValue | null>(null);
@@ -53,7 +68,7 @@ export interface StellarWalletProviderProps {
  */
 export function StellarWalletProvider({
   children,
-  network = 'TESTNET',
+  network = DEFAULT_STELLAR_NETWORK,
   externalKit,
 }: StellarWalletProviderProps): JSX.Element {
   const [kit, setKit] = useState<StellarWalletsKit | null>(null);
@@ -183,10 +198,33 @@ export function StellarWalletProvider({
     [kit]
   );
 
+  // Ask the wallet which network it is set to
+  const getWalletNetwork = useCallback(async (): Promise<WalletNetworkInfo | null> => {
+    if (!kit) {
+      return null;
+    }
+
+    try {
+      const reported = await Promise.race([
+        kit.getNetwork(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), WALLET_NETWORK_TIMEOUT_MS)),
+      ]);
+      if (!reported?.networkPassphrase) {
+        return null;
+      }
+      return { network: reported.network, networkPassphrase: reported.networkPassphrase };
+    } catch (error) {
+      // Not every wallet module can report its network
+      console.warn('[StellarWalletProvider] Could not read the wallet network:', error);
+      return null;
+    }
+  }, [kit]);
+
   const contextValue = useMemo<StellarWalletContextValue>(
     () => ({
       kit,
       isInitialized,
+      network,
       stellarAddress,
       isConnected: !!stellarAddress,
       isConnecting,
@@ -194,22 +232,33 @@ export function StellarWalletProvider({
       disconnect,
       signMessage,
       signTransaction,
+      getWalletNetwork,
     }),
     [
       kit,
       isInitialized,
+      network,
       stellarAddress,
       isConnecting,
       connect,
       disconnect,
       signMessage,
       signTransaction,
+      getWalletNetwork,
     ]
   );
 
   return (
     <StellarWalletContext.Provider value={contextValue}>{children}</StellarWalletContext.Provider>
   );
+}
+
+/**
+ * Stellar network the SDK is configured for, also usable outside of a
+ * StellarWalletProvider (where it is the default network)
+ */
+export function useConfiguredStellarNetwork(): StellarNetwork {
+  return useContext(StellarWalletContext)?.network ?? DEFAULT_STELLAR_NETWORK;
 }
 
 /**

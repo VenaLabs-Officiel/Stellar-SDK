@@ -20,6 +20,7 @@ import {
 } from '../types';
 import { VenalabsApiError, VenalabsErrorCodes } from './errors';
 import { fetchWithRetry, FetchWithRetryOptions } from './fetchWithRetry';
+import { DEFAULT_STELLAR_NETWORK, toCheckerNetwork } from '../utils/stellarNetworkUtils';
 
 const DEFAULT_BASE_URL = 'https://api.venalabs.com';
 const DEFAULT_TIMEOUT = 30000;
@@ -376,6 +377,7 @@ export class VenalabsApiClient {
    * Link a Stellar wallet to the user's account
    * @param walletAddress - The wallet address to link
    * @param signature - Signature of the nonce message
+   * @param network - Checker network the wallet is linked for (default: STELLAR_TESTNET)
    * @returns Promise resolving to wallet link response
    */
   async linkStellarWallet(
@@ -392,7 +394,7 @@ export class VenalabsApiClient {
     const request: VenalabsWalletLinkRequest = {
       walletAddress,
       signature,
-      network: network || 'STELLAR_TESTNET',
+      network: network || toCheckerNetwork(DEFAULT_STELLAR_NETWORK),
     };
     return this.post<VenalabsWalletLinkResponse>('/wallet/stellar/link', request);
   }

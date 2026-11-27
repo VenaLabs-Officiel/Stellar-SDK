@@ -9,7 +9,7 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     environmentMatchGlobs: [
       // jsdom with Node's native AbortController, required by the native fetch
-      ['src/components/**/*.test.tsx', './src/test/jsdom-environment.ts'],
+      ['src/**/*.test.tsx', './src/test/jsdom-environment.ts'],
     ],
     // Loaded for every test file; DOM-only mocks are guarded inside the file
     setupFiles: ['./src/test/setup.ts'],

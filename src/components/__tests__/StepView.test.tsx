@@ -36,6 +36,7 @@ beforeEach(() => {
     disconnect: vi.fn(),
     signMessage: vi.fn(),
     signTransaction: vi.fn(),
+    getWalletNetwork: vi.fn().mockResolvedValue(null),
   };
 });
 

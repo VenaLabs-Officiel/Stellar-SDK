@@ -11,7 +11,7 @@ import { useTranslation } from '../../i18n';
 import { GlassButton } from './GlassCard';
 import type { VenalabsApiClient } from '../../api';
 
-import { getNetworkPassphrase } from '../../utils/stellarNetworkUtils';
+import { getNetworkPassphrase, findWalletNetworkMismatch } from '../../utils/stellarNetworkUtils';
 
 export interface WalletLinkerProps {
   /** API client instance for making wallet API calls */
@@ -34,8 +34,8 @@ export function WalletLinker({
   onWalletLinked,
 }: WalletLinkerProps): JSX.Element {
   const { t } = useTranslation();
-  const { stellarAddress, isConnected, isConnecting, connect } = useStellarWallet();
-  const { signMessage } = useStellarWallet();
+  const { stellarAddress, isConnected, isConnecting, connect, signMessage, getWalletNetwork } =
+    useStellarWallet();
 
   const { setLinkedWalletForNetwork } = useWalletStore();
 
@@ -63,6 +63,18 @@ export function WalletLinker({
     setError(null);
 
     try {
+      // The passphrase comes from the network of the checker; an unknown
+      // network stops here with an explicit error
+      const passphrase = getNetworkPassphrase(network);
+
+      // Do not ask for a signature while the wallet is set to another network
+      const walletNetwork = await findWalletNetworkMismatch(getWalletNetwork, network);
+      if (walletNetwork) {
+        setError(t('wallet.networkMismatch', { actual: walletNetwork, expected: network }));
+        setLinking(false);
+        return;
+      }
+
       // 1. Get nonce from backend
       const nonceResponse = await apiClient.getWalletNonce(stellarAddress);
 
@@ -75,7 +87,7 @@ export function WalletLinker({
         `Nonce: ${nonceResponse.nonce}`;
 
       // 3. Sign message with wallet
-      const signature = await signMessage(formattedMessage, getNetworkPassphrase(network));
+      const signature = await signMessage(formattedMessage, passphrase);
 
       // 4. Link wallet on backend
       const linkResponse = await apiClient.linkStellarWallet(stellarAddress, signature, network);
@@ -100,6 +112,7 @@ export function WalletLinker({
     stellarAddress,
     apiClient,
     signMessage,
+    getWalletNetwork,
     network,
     onWalletLinked,
     setLinkedWalletForNetwork,

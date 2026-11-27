@@ -21,6 +21,8 @@ import {
 } from '../ui/GlassCard';
 import { StepContent } from '../ui/StepContent';
 import type { VenalabsApiClient } from '../../api';
+import { useConfiguredStellarNetwork } from '../../wallet/StellarWalletProvider';
+import { resolveCheckerNetwork } from '../../utils/stellarNetworkUtils';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -59,6 +61,7 @@ export function StepView({
   onFinishCourse,
 }: StepViewProps) {
   const { t, locale } = useTranslation();
+  const configuredNetwork = useConfiguredStellarNetwork();
   const [currentProgress, setCurrentProgress] = useState<VenalabsProgress | null>(progress || null);
 
   // Update progress when prop changes
@@ -123,21 +126,8 @@ export function StepView({
     const checker = getCheckerForStep();
     if (!checker || !linkedWallets) return undefined;
 
-    let network: string | undefined;
-    if (checker.linkedConfig?.network) {
-      network = checker.linkedConfig.network;
-    } else if (checker.balanceConfig?.network) {
-      network = checker.balanceConfig.network;
-    } else if (checker.transactionConfig?.network) {
-      network = checker.transactionConfig.network;
-    } else if (checker.nftMintConfig?.network) {
-      network = checker.nftMintConfig.network;
-    }
-
-    if (network) {
-      return linkedWallets[network];
-    }
-    return undefined;
+    // Same resolution as the checker components: checker network, then the prop
+    return linkedWallets[resolveCheckerNetwork(checker, configuredNetwork).network];
   };
 
   const handleComplete = async (response?: unknown) => {

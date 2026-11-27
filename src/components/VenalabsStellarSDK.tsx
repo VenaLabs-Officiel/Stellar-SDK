@@ -30,6 +30,7 @@ import { CourseDetailView } from './core/CourseDetailView';
 import { StepView } from './core/StepView';
 import { EmptyState, LoadingSmooth } from './ui/GlassCard';
 import { SdkConfigContext, type SdkConfig } from '../utils/sdkConfig';
+import { isStellarNetwork } from '../utils/stellarNetworkUtils';
 
 // ============================================================
 // Props Interface
@@ -621,6 +622,24 @@ export function VenalabsStellarSDK({
 
   // Parse minHeight
   const minHeightStyle = typeof minHeight === 'number' ? `${minHeight}px` : minHeight;
+
+  // An unknown network is a configuration error: say so instead of using testnet
+  if (stellarNetwork !== undefined && !isStellarNetwork(stellarNetwork)) {
+    return (
+      <div
+        className={`venalabs-sdk-container ${className}`.trim()}
+        style={{ minHeight: minHeightStyle }}
+      >
+        <SDKErrorView
+          error={
+            new Error(
+              `Invalid stellarNetwork "${String(stellarNetwork)}". Expected "TESTNET" or "PUBLIC".`
+            )
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div

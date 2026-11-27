@@ -27,6 +27,8 @@ const translations = {
     'verification.verified': 'Verified!',
     'verification.verifyComplete': 'Verify & Complete',
     'verification.label': 'Verification:',
+    'verification.unsupportedNetwork':
+      'This verification targets a network ({network}) that is not supported in this SDK version.',
 
     // Wallet
     'wallet.failedNonce': 'Failed to get nonce',
@@ -41,6 +43,8 @@ const translations = {
     'wallet.linkWallet': 'Link Wallet',
     'wallet.currentlyLinked': 'Currently linked:',
     'wallet.switchWalletWarning': '(Connect this wallet or link the connected one)',
+    'wallet.networkMismatch':
+      'Your wallet is set to another network ({actual}). Switch it to {expected}, then try again.',
 
     // Courses
     'courses.notFound': 'Course not found',
@@ -138,6 +142,8 @@ const translations = {
     'verification.verified': 'Vérifié !',
     'verification.verifyComplete': 'Vérifier et compléter',
     'verification.label': 'Vérification :',
+    'verification.unsupportedNetwork':
+      "Cette vérification cible un réseau ({network}) qui n'est pas pris en charge dans cette version du SDK.",
 
     // Wallet
     'wallet.failedNonce': 'Échec de récupération du nonce',
@@ -152,6 +158,8 @@ const translations = {
     'wallet.linkWallet': 'Lier le portefeuille',
     'wallet.currentlyLinked': 'Actuellement lié :',
     'wallet.switchWalletWarning': '(Connectez ce portefeuille ou liez celui connecté)',
+    'wallet.networkMismatch':
+      'Votre portefeuille est réglé sur un autre réseau ({actual}). Passez-le sur {expected}, puis réessayez.',
 
     // Courses
     'courses.notFound': 'Cours non trouvé',
