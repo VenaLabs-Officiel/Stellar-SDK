@@ -44,7 +44,7 @@ import { isStellarNetwork } from '../utils/stellarNetworkUtils';
 export type TokenProvider = () => Promise<string>;
 
 export interface VenalabsStellarSDKProps {
-  /** API Key provided by Airdroped dashboard */
+  /** API Key provided by the VenaLabs dashboard */
   apiKey: string;
   /**
    * Token provider function for authentication
