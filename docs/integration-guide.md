@@ -1,6 +1,6 @@
 # VenaLabs Stellar SDK: Integration Guide
 
-This guide shows how to embed VenaLabs Stellar courses in a React application with `@venalabs/stellar-sdk` 2.0.1.
+This guide shows how to embed VenaLabs Stellar courses in a React application with `@venalabs/stellar-sdk` 2.1.0.
 
 ## How it works
 

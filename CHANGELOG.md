@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-27
+
 ### Added
 
+- `sorobanRpcUrl` prop to choose the Soroban RPC endpoint used for NFT minting
+- `userKey` prop to reset the SDK session when the signed-in user changes
+- `CERTIFICATE` steps are rendered and can be completed; unsupported checker types are flagged instead of failing silently
+- `WalletNetworkInfo` type export
 - `LICENSE` file (MIT), matching the `license` field already declared in `package.json`
 - `SECURITY.md`, `CONTRIBUTING.md` and `THIRD-PARTY-NOTICES.md`
 - README sections: deployed contracts, known limitations, roadmap
@@ -19,10 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README and integration guide rewritten to describe the actual authentication flow (`POST /api/v1/sdk/auth/token`, response field `token`) and the props that exist in 2.0.1
 - Documentation and code comments now refer to the VenaLabs dashboard
 - CI runs lint, format check, type check, tests and build on Node.js 20 and 22
+- The repository moved to `github.com/VenaLabs-Officiel/Stellar-SDK`; the package is published from GitHub Actions with npm provenance
+- The `types` export condition comes first and source maps are no longer published
+- The "Retry verification" button is renamed "Record mint again"
 - `package.json` declares `engines.node` as `>=20`
 
 ### Fixed
 
+- NFT minting on the public network: the retired Soroban RPC endpoint is replaced by `https://mainnet.sorobanrpc.com`
+- NFT minting: the transaction is confirmed on-chain before the mint is recorded, every Soroban RPC call has a timeout, and a lost `sendTransaction` answer is no longer reported as a failure
+- NFT minting: a submitted transaction is tracked across page reloads and step changes, and "Verify & Complete" stays available whenever a mint may exist
+- Quiz: the correct answer comes from `correctOptionIndex` returned by the API (falls back to the first option when the API omits it)
+- Wallet: `connect()` waits for the wallet selection, and linking is no longer blocked by the network selected in the wallet
+- Stellar networks are resolved from a single place, tolerant to case and surrounding spaces in a checker network
+- API client: only GET requests are retried, tokens are validated, concurrent token refreshes are shared and empty response bodies are accepted
+- Errors: rejected actions are handled and refusals from the API are shown to the user
+- Content: only `http(s)`, `mailto:` and `tel:` links and YouTube/Vimeo embeds are rendered; useful video URL parameters are kept
+- Step content is remounted on step change; pending work is released when components unmount
 - Checker verification: the `useCallback` hook is now called before the early return for `NFT_MINT` checkers, so the number of hooks no longer depends on the checker type
 
 ### Removed
