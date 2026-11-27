@@ -4,7 +4,7 @@
 
 Official React SDK for embedding VenaLabs Stellar courses in your website.
 
-This document describes version 2.0.1, the version currently published on npm.
+This documentation describes version 2.0.1.
 
 ## Installation
 
@@ -21,19 +21,22 @@ npm install @venalabs/stellar-sdk
 ## Quick Start
 
 ```tsx
+import { useCallback } from 'react';
 import VenalabsStellarSDK from '@venalabs/stellar-sdk';
 import '@venalabs/stellar-sdk/style.css';
 
 function App() {
-  const getAccessToken = async () => {
+  const getAccessToken = useCallback(async () => {
     const res = await fetch('<your token endpoint>', { credentials: 'include' });
     const data = await res.json();
     return data.token;
-  };
+  }, []);
 
   return <VenalabsStellarSDK apiKey="your-api-key" getAccessToken={getAccessToken} />;
 }
 ```
+
+Keep `getAccessToken` referentially stable (wrap it in `useCallback` or define it outside the component): the SDK creates a new API client whenever the identity of this function changes.
 
 A step-by-step walkthrough is available in the [integration guide](./docs/integration-guide.md).
 
@@ -105,40 +108,48 @@ Your backend must implement an endpoint that:
 ```typescript
 // routes/venalabs.ts
 import express from 'express';
+// Your own code: returns the id of the signed-in user, or null when nobody is signed in
+import { getAuthenticatedUserId } from './auth';
 
 const router = express.Router();
 
 router.get('/venalabs-token', async (req, res) => {
-  // 1. Get the authenticated user from your session
-  const userId = req.session?.userId;
+  // 1. Only issue tokens to users authenticated in your system
+  const userId = getAuthenticatedUserId(req);
   if (!userId) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // 2. Call the VenaLabs API to get a token for this user
-  const response = await fetch('https://api.venalabs.com/api/v1/sdk/auth/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': process.env.VENALABS_API_KEY!,
-      'X-Api-Secret': process.env.VENALABS_API_SECRET!,
-    },
-    body: JSON.stringify({ userId }),
-  });
+  try {
+    // 2. Call the VenaLabs API to get a token for this user
+    const response = await fetch('https://api.venalabs.com/api/v1/sdk/auth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': process.env.VENALABS_API_KEY!,
+        'X-Api-Secret': process.env.VENALABS_API_SECRET!,
+      },
+      body: JSON.stringify({ userId }),
+    });
 
-  if (!response.ok) {
-    return res.status(502).json({ error: 'Could not get a VenaLabs token' });
+    if (!response.ok) {
+      return res.status(502).json({ error: 'Could not get a VenaLabs token' });
+    }
+
+    // The API answers { token, expiresIn }
+    const data = (await response.json()) as { token: string; expiresIn: number };
+
+    // 3. Return the token to the frontend
+    res.json({ token: data.token });
+  } catch {
+    res.status(502).json({ error: 'Could not reach the VenaLabs API' });
   }
-
-  // The API answers { token, expiresIn }
-  const data = await response.json();
-
-  // 3. Return the token to the frontend
-  res.json({ token: data.token });
 });
 
 export default router;
 ```
+
+How the user is identified is up to you: `getAuthenticatedUserId` stands for your own session or JWT check. Mount the router so that the endpoint is reachable at `/api/venalabs-token`, the path used by the client example below (for example `app.use('/api', router)`). The built-in `fetch` requires Node.js 18 or later.
 
 ## Complete Integration Example
 
@@ -188,18 +199,20 @@ export default function CoursesPage() {
 
 `stellarNetwork="PUBLIC"` is for courses that run on the public network. Leave it out (or pass `"TESTNET"`) for testnet courses.
 
+`/api/venalabs-token` is a relative URL, so it must be served from the same origin as the page, or proxied from that origin to your own server.
+
 ## Troubleshooting
 
 The SDK maps the HTTP status returned by the API to one of the error codes below (`VenalabsErrorCodes`).
 
-| Error                   | Cause                                                                  | Solution                                                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `INVALID_TOKEN`         | The API answered 401, even after the SDK called `getAccessToken` again | Check that `apiKey` is active, that the token was created with the same API key, and that `getAccessToken` returns the `token` string |
-| `TOKEN_EXPIRED`         | The API reported an expired token                                      | The SDK calls `getAccessToken` again on 401; make sure it returns a fresh token                                                       |
-| `INVALID_API_KEY`       | The API answered 403                                                   | Check the API key in your VenaLabs dashboard                                                                                          |
-| `RATE_LIMITED`          | The API answered 429                                                   | Reduce the request rate or contact support                                                                                            |
-| Blank/unstyled screen   | CSS not imported                                                       | Add `import '@venalabs/stellar-sdk/style.css'` to your app                                                                            |
-| Wallet connection fails | Wrong network                                                          | Ensure `stellarNetwork` matches your wallet's network                                                                                 |
+| Error                   | Cause                                                                                                                                                                                                               | Solution                                                                                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `INVALID_TOKEN`         | The API answered 401, even after the SDK called `getAccessToken` again. The API answers 401 for a missing, invalid or inactive API key, and for an invalid or expired token                                         | Check the API key in your VenaLabs dashboard, check that the token was created with the same API key, and make sure `getAccessToken` returns a fresh `token` string each time it is called |
+| `TOKEN_EXPIRED`         | Only produced when a 401 response body contains `type: "TOKEN_EXPIRED"`. The current API does not send that field, so an expired token is reported as `INVALID_TOKEN` once the automatic refresh attempt has failed | See `INVALID_TOKEN`                                                                                                                                                                        |
+| `INVALID_API_KEY`       | The code exists in the SDK and is mapped to HTTP 403. The current API reports an invalid API key with a 401, so that case is reported as `INVALID_TOKEN`                                                            | See `INVALID_TOKEN`                                                                                                                                                                        |
+| `RATE_LIMITED`          | The API answered 429                                                                                                                                                                                                | Reduce the request rate or contact support                                                                                                                                                 |
+| Blank/unstyled screen   | CSS not imported                                                                                                                                                                                                    | Add `import '@venalabs/stellar-sdk/style.css'` to your app                                                                                                                                 |
+| Wallet connection fails | Wrong network                                                                                                                                                                                                       | Ensure `stellarNetwork` matches your wallet's network                                                                                                                                      |
 
 ## TypeScript Support
 
@@ -207,19 +220,16 @@ The SDK is fully typed. Import types as needed:
 
 ```typescript
 import VenalabsStellarSDK, {
-  VenalabsStellarSDKProps,
-  TokenProvider,
-  VenalabsCourse,
-  VenalabsProgress,
+  type VenalabsStellarSDKProps,
+  type TokenProvider,
+  type VenalabsCourse,
+  type VenalabsProgress,
 } from '@venalabs/stellar-sdk';
 ```
 
 ## Browser Support
 
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
+Modern evergreen browsers (Chrome, Firefox, Safari, Edge).
 
 ## Security Notes
 
@@ -249,7 +259,8 @@ These apply to version 2.0.1.
 
 - Supported Stellar checkers: `LINKED`, `BALANCE`, `TRANSACTION` and `NFT_MINT`. Other checker types are not supported.
 - The built-in wallet connection supports Freighter only.
-- Only one map is displayed: the first one returned by the API.
+- Only one map is displayed: the first one returned by the API. When the API returns several maps, the map selector buttons are rendered but selecting another map has no effect.
+- CommonJS is not supported under Node.js: `require('@venalabs/stellar-sdk')` fails with `HTMLElement is not defined` (the `require` entry is a UMD browser build). Use the ESM `import` instead.
 - Minting the NFT on the public network does not work in 2.0.1: the Soroban RPC endpoint built into this version (`https://stellar-soroban-public.nodies.app`) no longer accepts requests. Minting on testnet uses a different endpoint.
 
 ## Roadmap
