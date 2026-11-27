@@ -6,7 +6,7 @@ import { VenalabsStellarSDK } from '../VenalabsStellarSDK';
 import type { VenalabsMap, VenalabsCourse, VenalabsProgress } from '../../types';
 
 // Helper to create a token provider
-const createTokenProvider = (token: string) => async () => token;
+const createTokenProvider = (token: string) => () => Promise.resolve(token);
 
 // Mock data
 const mockMaps: VenalabsMap[] = [
@@ -139,7 +139,7 @@ afterEach(() => server.resetHandlers());
 
 describe('VenalabsStellarSDK', () => {
   describe('Props', () => {
-    it('should render with required props', async () => {
+    it('should render with required props', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -152,7 +152,7 @@ describe('VenalabsStellarSDK', () => {
       expect(document.querySelector('.venalabs-sdk-container')).toBeInTheDocument();
     });
 
-    it('should accept optional lang prop (default: fr)', async () => {
+    it('should accept optional lang prop (default: fr)', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -165,7 +165,7 @@ describe('VenalabsStellarSDK', () => {
       expect(document.querySelector('.venalabs-sdk-container')).toBeInTheDocument();
     });
 
-    it('should accept optional minHeight prop', async () => {
+    it('should accept optional minHeight prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -179,7 +179,7 @@ describe('VenalabsStellarSDK', () => {
       expect(container).toHaveStyle({ minHeight: '800px' });
     });
 
-    it('should accept string minHeight prop', async () => {
+    it('should accept string minHeight prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -193,7 +193,7 @@ describe('VenalabsStellarSDK', () => {
       expect(container).toHaveStyle({ minHeight: '50vh' });
     });
 
-    it('should accept optional className prop', async () => {
+    it('should accept optional className prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -443,7 +443,7 @@ describe('VenalabsStellarSDK', () => {
   });
 
   describe('Responsive Layout', () => {
-    it('should have width: 100% on container', async () => {
+    it('should have width: 100% on container', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"

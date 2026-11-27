@@ -104,7 +104,7 @@ export function StellarWalletProvider({
       }
     };
 
-    initKit();
+    void initKit();
   }, [setConnectionError, kit, externalKit]);
 
   // Connect wallet
@@ -119,6 +119,7 @@ export function StellarWalletProvider({
 
     try {
       await kit.openModal({
+        // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
         onWalletSelected: async (option: { id: string }) => {
           kit.setWallet(option.id);
           setWalletId(option.id);
@@ -142,7 +143,7 @@ export function StellarWalletProvider({
   const disconnect = useCallback(() => {
     if (kit) {
       try {
-        kit.disconnect();
+        void kit.disconnect();
       } catch (error) {
         console.warn('[StellarWalletProvider] Disconnect error:', error);
       }

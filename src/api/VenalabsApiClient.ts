@@ -24,6 +24,9 @@ import { fetchWithRetry, FetchWithRetryOptions } from './fetchWithRetry';
 const DEFAULT_BASE_URL = 'https://api.venalabs.com';
 const DEFAULT_TIMEOUT = 30000;
 
+/** Shape of the JSON body returned by the API on error responses */
+type ApiErrorBody = Parameters<typeof VenalabsApiError.fromResponse>[1];
+
 /**
  * API client for communicating with Venalabs SDK endpoints
  *
@@ -160,11 +163,11 @@ export class VenalabsApiClient {
     }
 
     if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
+      const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
       throw VenalabsApiError.fromResponse(response.status, body);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
   /**
@@ -191,7 +194,7 @@ export class VenalabsApiClient {
     }
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
+      const errorBody = (await response.json().catch(() => ({}))) as ApiErrorBody;
       throw VenalabsApiError.fromResponse(response.status, errorBody);
     }
 
@@ -201,7 +204,7 @@ export class VenalabsApiClient {
       return undefined as T;
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
   // ============================================================

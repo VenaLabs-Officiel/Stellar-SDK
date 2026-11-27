@@ -67,7 +67,7 @@ export function StepContent({
     case 'TEXT':
       return (
         <TextStepContent
-          content={getLocalizedContent(step.textContent?.content, locale) as unknown[]}
+          content={getLocalizedContent(step.textContent?.content, locale)}
           onComplete={onComplete}
           isCompleted={isCompleted}
         />
@@ -96,7 +96,7 @@ export function StepContent({
     case 'EXE':
       return (
         <ExeStepContent
-          instructions={getLocalizedContent(step.exeContent?.instructions, locale) as unknown[]}
+          instructions={getLocalizedContent(step.exeContent?.instructions, locale)}
           onComplete={onComplete}
           isCompleted={isCompleted}
           apiClient={apiClient}
@@ -183,7 +183,7 @@ function BlockRenderer({ block, depth = 0 }: { block: BlockItem; depth?: number 
         </p>
       );
 
-    case 'heading':
+    case 'heading': {
       const level = (block.props?.level as number) || 3;
       const HeadingTag = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3';
       const headingClass =
@@ -199,6 +199,7 @@ function BlockRenderer({ block, depth = 0 }: { block: BlockItem; depth?: number 
           ))}
         </HeadingTag>
       );
+    }
 
     case 'bulletListItem':
       return (
@@ -349,7 +350,7 @@ function TextStepContent({
     <div className="venalabs-step-content">
       <BlockContentView blocks={content} noContentText={t('stepContent.noContent')} />
       {!isCompleted && (
-        <GlassButton variant="secondary" onClick={handleComplete} disabled={loading}>
+        <GlassButton variant="secondary" onClick={() => void handleComplete()} disabled={loading}>
           {loading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
           {t('stepContent.markAsComplete')}
         </GlassButton>
@@ -418,7 +419,7 @@ function VideoStepContent({
       )}
 
       {!isCompleted && (
-        <GlassButton variant="primary" onClick={handleComplete} disabled={loading}>
+        <GlassButton variant="primary" onClick={() => void handleComplete()} disabled={loading}>
           {loading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
           {t('stepContent.markAsComplete')}
         </GlassButton>
@@ -598,7 +599,7 @@ function ExeStepContent({
       )}
 
       {!isCompleted && (
-        <GlassButton variant="primary" onClick={handleComplete} disabled={loading}>
+        <GlassButton variant="primary" onClick={() => void handleComplete()} disabled={loading}>
           {loading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
           {t('stepContent.markAsComplete')}
         </GlassButton>
@@ -639,7 +640,7 @@ function RewardStepContent({
 
   const handleClaim = () => {
     setClaiming(true);
-    Promise.resolve(onComplete()).finally(() => {
+    void Promise.resolve(onComplete()).finally(() => {
       setClaiming(false);
     });
   };

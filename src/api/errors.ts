@@ -48,7 +48,7 @@ export class VenalabsApiError extends Error {
 
     // Maintains proper stack trace for where our error was thrown (only available on V8)
     const ErrorWithCaptureStackTrace = Error as typeof Error & {
-      captureStackTrace?: (targetObject: object, constructorOpt?: Function) => void;
+      captureStackTrace?: (targetObject: object, constructorOpt?: object) => void;
     };
     if (typeof ErrorWithCaptureStackTrace.captureStackTrace === 'function') {
       ErrorWithCaptureStackTrace.captureStackTrace(this, VenalabsApiError);

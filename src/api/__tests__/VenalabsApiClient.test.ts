@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { VenalabsApiClient } from '../VenalabsApiClient';
 import { VenalabsApiError, VenalabsErrorCodes } from '../errors';
-import type { VenalabsMap, VenalabsCourse, VenalabsProgress } from '../../types';
+import type { TokenProvider, VenalabsMap, VenalabsCourse, VenalabsProgress } from '../../types';
 
 // Mock data
 const mockMaps: VenalabsMap[] = [
@@ -149,7 +149,7 @@ afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 
 // Helper to create a token provider
-const createTokenProvider = (token: string) => async () => token;
+const createTokenProvider = (token: string) => () => Promise.resolve(token);
 
 describe('VenalabsApiClient', () => {
   describe('constructor', () => {
@@ -166,7 +166,7 @@ describe('VenalabsApiClient', () => {
       expect(() => {
         new VenalabsApiClient({
           apiKey: 'key',
-          getAccessToken: undefined as any,
+          getAccessToken: undefined as unknown as TokenProvider,
         });
       }).toThrow('getAccessToken is required');
     });
@@ -256,10 +256,10 @@ describe('VenalabsApiClient', () => {
 
       const client = new VenalabsApiClient({
         apiKey: 'valid-key',
-        getAccessToken: async () => {
+        getAccessToken: () => {
           tokenFetchCount++;
           // First call returns expired token, second returns valid token
-          return tokenFetchCount === 1 ? 'expired-token' : 'fresh-token';
+          return Promise.resolve(tokenFetchCount === 1 ? 'expired-token' : 'fresh-token');
         },
         baseUrl: BASE_URL,
       });

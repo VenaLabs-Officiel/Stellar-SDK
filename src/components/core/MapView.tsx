@@ -26,7 +26,7 @@ function getLocalStorage<T>(key: string, defaultValue: T): T {
   if (typeof window === 'undefined') return defaultValue;
   try {
     const item = localStorage.getItem(key);
-    return item !== null ? JSON.parse(item) : defaultValue;
+    return item !== null ? (JSON.parse(item) as T) : defaultValue;
   } catch {
     return defaultValue;
   }

@@ -194,7 +194,7 @@ export function CheckerVerification({
           {/* Verify button */}
           <GlassButton
             variant="primary"
-            onClick={handleVerify}
+            onClick={() => void handleVerify()}
             disabled={verifying || !canVerify || verificationSuccess}
           >
             {verifying && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}

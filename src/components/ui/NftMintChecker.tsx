@@ -115,7 +115,7 @@ export function NftMintChecker({
       setVoucherLoading(false);
     };
 
-    loadVoucher();
+    void loadVoucher();
   }, [apiClient, courseId, stepId, isCompleted]);
 
   // Handle mint
@@ -404,7 +404,7 @@ export function NftMintChecker({
           {/* Verify button */}
           <GlassButton
             variant="primary"
-            onClick={handleVerify}
+            onClick={() => void handleVerify()}
             disabled={verifying || !canVerifyMinted || verificationSuccess}
           >
             {verifying && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
@@ -476,7 +476,7 @@ export function NftMintChecker({
             {/* Mint button */}
             <GlassButton
               variant="secondary"
-              onClick={handleMint}
+              onClick={() => void handleMint()}
               disabled={mintLoading || !canMintOrVerify || mintSuccess}
             >
               {mintLoading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
@@ -486,7 +486,7 @@ export function NftMintChecker({
             {/* Verify button */}
             <GlassButton
               variant="primary"
-              onClick={handleVerify}
+              onClick={() => void handleVerify()}
               disabled={verifying || !canMintOrVerify || !mintSuccess || verificationSuccess}
             >
               {verifying && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}

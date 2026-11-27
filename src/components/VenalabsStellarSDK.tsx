@@ -339,14 +339,14 @@ function VenalabsStellarSDKProvider({
       try {
         await Promise.all([refreshMaps(), refreshProgress()]);
         // Fetch linked wallet after auth is verified (maps/progress succeeded)
-        fetchLinkedWallet();
+        void fetchLinkedWallet();
       } catch (err) {
         // Error is already set in refreshMaps
       } finally {
         setLoading(false);
       }
     };
-    init();
+    void init();
   }, [refreshMaps, refreshProgress, fetchLinkedWallet]);
 
   // SDK context value
@@ -431,7 +431,7 @@ function SDKRouter() {
       setCurrentCourse(course);
       setCourseLoading(false);
     };
-    loadCourse();
+    void loadCourse();
   }, [view, getCourse]);
 
   // Handle node click from map
@@ -526,7 +526,7 @@ function SDKRouter() {
 
   // Error state
   if (error) {
-    return <SDKErrorView error={error} onRetry={refreshMaps} />;
+    return <SDKErrorView error={error} onRetry={() => void refreshMaps()} />;
   }
 
   // Map view

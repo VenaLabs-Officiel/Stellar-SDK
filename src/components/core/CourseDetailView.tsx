@@ -88,7 +88,7 @@ export function CourseDetailView({
 
     // If no progress yet and clicking first step, start course
     if (!progress && onStartCourse) {
-      handleStartCourse();
+      void handleStartCourse();
       return;
     }
 
@@ -131,7 +131,7 @@ export function CourseDetailView({
                 {!progress || progress.status === 'NOT_STARTED' ? (
                   <GlassButton
                     variant="primary"
-                    onClick={handleStartCourse}
+                    onClick={() => void handleStartCourse()}
                     disabled={startingCourse}
                   >
                     {startingCourse && (
