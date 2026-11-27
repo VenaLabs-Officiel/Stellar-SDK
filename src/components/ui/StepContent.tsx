@@ -24,6 +24,7 @@ import {
 } from './GlassCard';
 import { CheckerVerification } from './CheckerVerification';
 import type { VenalabsApiClient } from '../../api';
+import { getSafeHttpUrl, getVideoEmbedUrl } from '../../utils/safeUrl';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -309,16 +310,17 @@ function InlineRenderer({ item }: { item: InlineItem }): ReactNode {
   }
 
   if (item.type === 'link') {
+    const children = item.content?.map((child, i) => <InlineRenderer key={i} item={child} />);
+
+    // Only absolute http(s) links are rendered as links (no javascript:, data:, ...)
+    const href = getSafeHttpUrl(item.href);
+    if (!href) {
+      return <span>{children}</span>;
+    }
+
     return (
-      <a
-        href={item.href || '#'}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="venalabs-link"
-      >
-        {item.content?.map((child, i) => (
-          <InlineRenderer key={i} item={child} />
-        ))}
+      <a href={href} target="_blank" rel="noopener noreferrer" className="venalabs-link">
+        {children}
       </a>
     );
   }
@@ -382,19 +384,8 @@ function VideoStepContent({
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
-  const getEmbedUrl = (url: string) => {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-      const videoId = url.includes('youtu.be')
-        ? url.split('/').pop()
-        : new URL(url).searchParams.get('v');
-      return `https://www.youtube.com/embed/${videoId}`;
-    }
-    if (url.includes('vimeo.com')) {
-      const videoId = url.split('/').pop();
-      return `https://player.vimeo.com/video/${videoId}`;
-    }
-    return url;
-  };
+  // Only YouTube and Vimeo videos are embedded; anything else is not loaded
+  const embedUrl = getVideoEmbedUrl(videoUrl);
 
   const handleComplete = async () => {
     setLoading(true);
@@ -407,14 +398,18 @@ function VideoStepContent({
 
   return (
     <div className="venalabs-step-content">
-      <div className="venalabs-video-container">
-        <iframe
-          src={getEmbedUrl(videoUrl)}
-          className="venalabs-video-iframe"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
-      </div>
+      {embedUrl ? (
+        <div className="venalabs-video-container">
+          <iframe
+            src={embedUrl}
+            className="venalabs-video-iframe"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        <MutedText>{t('stepContent.videoUnavailable')}</MutedText>
+      )}
 
       {transcript && (
         <div className="venalabs-transcript">
