@@ -13,8 +13,9 @@ import type { VenalabsApiClient } from '../../api';
 import { VenalabsApiError } from '../../api';
 import type { VenalabsChecker, VenalabsNftVoucherResponse } from '../../types';
 import { getLocalizedText } from '../../types';
+import { useSdkConfig } from '../../utils/sdkConfig';
 import {
-  getSorobanRpcUrl,
+  resolveSorobanRpc,
   getNetworkPassphrase,
   getExplorerUrl as getExplorerUrlUtil,
 } from '../../utils/stellarNetworkUtils';
@@ -41,6 +42,11 @@ export interface NftMintCheckerProps {
   onWalletLinked: (address: string, network: string) => void;
   /** Callback when verification succeeds */
   onVerificationSuccess: () => void;
+  /**
+   * Soroban RPC URL replacing the default endpoint of the checker network.
+   * Falls back to the `sorobanRpcUrl` prop of `VenalabsStellarSDK`.
+   */
+  sorobanRpcUrl?: string;
 }
 
 /**
@@ -59,8 +65,11 @@ export function NftMintChecker({
   linkedWalletAddress,
   onWalletLinked,
   onVerificationSuccess,
+  sorobanRpcUrl,
 }: NftMintCheckerProps): JSX.Element {
   const { t, locale } = useTranslation();
+  const sdkConfig = useSdkConfig();
+  const rpcUrlOverride = sorobanRpcUrl ?? sdkConfig.sorobanRpcUrl;
   const { stellarAddress, isConnected, signTransaction } = useStellarWallet();
 
   // Mint states
@@ -169,11 +178,11 @@ export function NftMintChecker({
         xdr,
       } = await import('@stellar/stellar-sdk');
 
-      const rpcUrl = getSorobanRpcUrl(checkerNetwork);
+      const rpcEndpoint = resolveSorobanRpc(checkerNetwork, rpcUrlOverride);
       const passphrase = getNetworkPassphrase(checkerNetwork);
 
-      const RpcServer = new StellarRpc.Server(rpcUrl, {
-        allowHttp: true,
+      const RpcServer = new StellarRpc.Server(rpcEndpoint.url, {
+        allowHttp: rpcEndpoint.allowHttp,
       });
 
       console.log('[NftMintChecker] Fetching account for:', stellarAddress);
@@ -254,7 +263,17 @@ export function NftMintChecker({
     }
 
     setMintLoading(false);
-  }, [stellarAddress, canMintOrVerify, apiClient, courseId, stepId, signTransaction, t]);
+  }, [
+    stellarAddress,
+    canMintOrVerify,
+    apiClient,
+    courseId,
+    stepId,
+    signTransaction,
+    t,
+    checkerNetwork,
+    rpcUrlOverride,
+  ]);
 
   // Handle verify
   const handleVerify = useCallback(async () => {

@@ -28,6 +28,7 @@ import { MapView } from './core/MapView';
 import { CourseDetailView } from './core/CourseDetailView';
 import { StepView } from './core/StepView';
 import { EmptyState, LoadingSmooth } from './ui/GlassCard';
+import { SdkConfigContext, type SdkConfig } from '../utils/sdkConfig';
 
 // ============================================================
 // Props Interface
@@ -68,6 +69,13 @@ export interface VenalabsStellarSDKProps {
   baseUrl?: string;
   /** External wallet kit instance (if host app already has one initialized) */
   externalWalletKit?: StellarWalletsKit | null;
+  /**
+   * Soroban RPC URL used for NFT minting, on testnet and mainnet alike.
+   * Defaults to https://soroban-testnet.stellar.org (testnet) and
+   * https://mainnet.sorobanrpc.com (mainnet). Must be an https:// URL;
+   * http:// is accepted for local development only.
+   */
+  sorobanRpcUrl?: string;
 }
 
 // ============================================================
@@ -584,6 +592,7 @@ export function VenalabsStellarSDK({
   className = '',
   baseUrl,
   externalWalletKit,
+  sorobanRpcUrl,
 }: VenalabsStellarSDKProps): JSX.Element {
   // Navigation state
   const [view, setView] = useState<SDKView>({ type: 'map' });
@@ -600,6 +609,9 @@ export function VenalabsStellarSDK({
     [view]
   );
 
+  // Configuration shared with nested components
+  const sdkConfig = useMemo<SdkConfig>(() => ({ sorobanRpcUrl }), [sorobanRpcUrl]);
+
   // Parse minHeight
   const minHeightStyle = typeof minHeight === 'number' ? `${minHeight}px` : minHeight;
 
@@ -615,9 +627,11 @@ export function VenalabsStellarSDK({
           lang={lang}
           baseUrl={baseUrl}
         >
-          <SDKNavigationContext.Provider value={navigationValue}>
-            <SDKRouter />
-          </SDKNavigationContext.Provider>
+          <SdkConfigContext.Provider value={sdkConfig}>
+            <SDKNavigationContext.Provider value={navigationValue}>
+              <SDKRouter />
+            </SDKNavigationContext.Provider>
+          </SdkConfigContext.Provider>
         </VenalabsStellarSDKProvider>
       </StellarWalletProvider>
     </div>
