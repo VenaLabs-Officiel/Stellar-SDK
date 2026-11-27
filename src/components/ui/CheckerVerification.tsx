@@ -19,6 +19,9 @@ import {
   toCheckerNetwork,
 } from '../../utils/stellarNetworkUtils';
 
+/** Checker types this SDK version can verify */
+const SUPPORTED_CHECKER_TYPES: readonly string[] = ['LINKED', 'BALANCE', 'TRANSACTION', 'NFT_MINT'];
+
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -115,6 +118,19 @@ export function CheckerVerification({
     setVerifying(false);
   }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
 
+  // A checker type added to the platform after this SDK version: say so
+  // instead of offering Stellar wallet actions that cannot satisfy it
+  if (!SUPPORTED_CHECKER_TYPES.includes(checker.type)) {
+    return (
+      <UnsupportedChecker
+        checker={checker}
+        locale={locale}
+        isCompleted={isCompleted}
+        message={t('verification.unsupportedChecker', { type: checker.type })}
+      />
+    );
+  }
+
   // For NFT_MINT checkers, use the dedicated component
   if (checker.type === 'NFT_MINT') {
     return (
@@ -134,13 +150,12 @@ export function CheckerVerification({
   // A network the SDK does not handle: explicit message, no wallet action
   if (!isNetworkSupported) {
     return (
-      <div className="venalabs-checker-verification">
-        <CheckerInfo checker={checker} locale={locale} />
-        <div className="venalabs-error-banner">
-          <AlertCircle className="venalabs-icon-md venalabs-text-error" />
-          <p>{t('verification.unsupportedNetwork', { network: checkerNetwork })}</p>
-        </div>
-      </div>
+      <UnsupportedChecker
+        checker={checker}
+        locale={locale}
+        isCompleted={isCompleted}
+        message={t('verification.unsupportedNetwork', { network: checkerNetwork })}
+      />
     );
   }
 
@@ -227,6 +242,40 @@ export function CheckerVerification({
                 ? t('verification.verified')
                 : t('verification.verifyComplete')}
           </GlassButton>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Displays a checker the SDK cannot verify (unknown type or network)
+ */
+function UnsupportedChecker({
+  checker,
+  locale,
+  isCompleted,
+  message,
+}: {
+  checker: VenalabsChecker;
+  locale: string;
+  isCompleted: boolean;
+  message: string;
+}): JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <div className="venalabs-checker-verification">
+      <CheckerInfo checker={checker} locale={locale} />
+      {isCompleted ? (
+        <div className="venalabs-success-banner">
+          <CheckCircle2 className="venalabs-icon-md venalabs-text-success" />
+          <p>{t('verification.stepVerified')}</p>
+        </div>
+      ) : (
+        <div className="venalabs-warning-banner">
+          <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
+          <p>{message}</p>
         </div>
       )}
     </div>

@@ -29,6 +29,8 @@ const translations = {
     'verification.label': 'Verification:',
     'verification.unsupportedNetwork':
       'This verification targets a network ({network}) that is not supported in this SDK version.',
+    'verification.unsupportedChecker':
+      'This verification type ({type}) is not supported in this SDK version.',
 
     // Wallet
     'wallet.failedNonce': 'Failed to get nonce',
@@ -109,6 +111,9 @@ const translations = {
 
     // Step content
     'stepContent.unknownStepType': 'Unknown step type: ',
+    'stepContent.unsupportedStepType': 'This step type is not supported in this SDK version.',
+    'stepContent.certificateMessage':
+      'You have reached the end of this course. Complete this step to finish it.',
     'stepContent.noContent': 'No content',
     'stepContent.markAsComplete': 'Mark as complete',
     'stepContent.transcript': 'Transcript',
@@ -151,6 +156,8 @@ const translations = {
     'verification.label': 'Vérification :',
     'verification.unsupportedNetwork':
       "Cette vérification cible un réseau ({network}) qui n'est pas pris en charge dans cette version du SDK.",
+    'verification.unsupportedChecker':
+      "Ce type de vérification ({type}) n'est pas pris en charge dans cette version du SDK.",
 
     // Wallet
     'wallet.failedNonce': 'Échec de récupération du nonce',
@@ -232,6 +239,10 @@ const translations = {
 
     // Step content
     'stepContent.unknownStepType': "Type d'étape inconnu : ",
+    'stepContent.unsupportedStepType':
+      "Ce type d'étape n'est pas pris en charge dans cette version du SDK.",
+    'stepContent.certificateMessage':
+      'Vous êtes arrivé au bout de ce cours. Complétez cette étape pour le terminer.',
     'stepContent.noContent': 'Aucun contenu',
     'stepContent.markAsComplete': 'Marquer comme terminé',
     'stepContent.transcript': 'Transcription',

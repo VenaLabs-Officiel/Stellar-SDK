@@ -117,13 +117,17 @@ export function StepContent({
           locale={locale}
         />
       );
-    default:
+    case 'CERTIFICATE':
       return (
-        <div className="venalabs-text-muted">
-          {t('stepContent.unknownStepType')}
-          {step.type}
-        </div>
+        <CertificateStepContent
+          title={getLocalizedText(step.title, locale)}
+          onComplete={onComplete}
+          isCompleted={isCompleted}
+        />
       );
+    default:
+      // A step type added to the platform after this SDK version
+      return <div className="venalabs-text-muted">{t('stepContent.unsupportedStepType')}</div>;
   }
 }
 
@@ -598,6 +602,58 @@ function ExeStepContent({
           </div>
         </div>
       )}
+
+      {!isCompleted && (
+        <GlassButton variant="primary" onClick={() => void handleComplete()} disabled={loading}>
+          {loading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
+          {t('stepContent.markAsComplete')}
+        </GlassButton>
+      )}
+
+      {isCompleted && (
+        <div className="venalabs-success-message">
+          <Check className="venalabs-icon-md venalabs-text-success" />
+          <p>{t('stepContent.stepCompleted')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// CERTIFICATE STEP
+// ============================================
+
+/**
+ * Minimal rendering of a CERTIFICATE step: the SDK API carries no certificate
+ * content and the SDK generates no certificate. The step can be completed so
+ * that the course can be finished.
+ */
+function CertificateStepContent({
+  title,
+  onComplete,
+  isCompleted,
+}: {
+  title: string;
+  onComplete: () => void | Promise<void>;
+  isCompleted: boolean;
+}) {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+
+  const handleComplete = async () => {
+    setLoading(true);
+    try {
+      await Promise.resolve(onComplete());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="venalabs-step-content">
+      <Title>{title}</Title>
+      <MutedText>{t('stepContent.certificateMessage')}</MutedText>
 
       {!isCompleted && (
         <GlassButton variant="primary" onClick={() => void handleComplete()} disabled={loading}>

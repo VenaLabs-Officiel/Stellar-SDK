@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { StepView } from '../core/StepView';
 import { VenalabsApiClient } from '../../api';
 import type { VenalabsCourse, VenalabsCourseStep, VenalabsProgress } from '../../types';
@@ -155,5 +155,187 @@ describe('StepView: no debug output', () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+});
+
+describe('StepView: CERTIFICATE step', () => {
+  const certificateCourse = () =>
+    makeCourse([
+      {
+        id: 'step-cert',
+        title: { en: 'Your certificate' },
+        type: 'CERTIFICATE',
+        order: 0,
+      },
+    ]);
+
+  it('renders a minimal step with the standard completion button', async () => {
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    render(
+      <StepView
+        course={certificateCourse()}
+        stepId="step-cert"
+        progress={inProgress}
+        onComplete={onComplete}
+      />
+    );
+
+    const content = document.querySelector('.venalabs-step-view__content')!;
+    expect(within(content as HTMLElement).getByText('Your certificate')).toBeInTheDocument();
+    expect(
+      screen.getByText('You have reached the end of this course. Complete this step to finish it.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown step type/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as complete' }));
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith('step-cert', undefined));
+  });
+
+  it('lets the user finish the course once the step is completed', () => {
+    const onFinishCourse = vi.fn();
+    const completed: VenalabsProgress = {
+      ...inProgress,
+      status: 'COMPLETED',
+      stepProgress: [{ stepId: 'step-cert', status: 'COMPLETED' }],
+    };
+    render(
+      <StepView
+        course={certificateCourse()}
+        stepId="step-cert"
+        progress={completed}
+        onComplete={vi.fn()}
+        onFinishCourse={onFinishCourse}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Mark as complete' })).not.toBeInTheDocument();
+    expect(screen.getByText('Step completed!')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Course' }));
+    expect(onFinishCourse).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('StepView: unknown step type', () => {
+  it('shows a neutral message without crashing', () => {
+    const course = makeCourse([
+      {
+        id: 'step-x',
+        title: { en: 'Something new' },
+        type: 'SURVEY' as never,
+        order: 0,
+      },
+    ]);
+
+    render(<StepView course={course} stepId="step-x" progress={inProgress} onComplete={vi.fn()} />);
+
+    expect(
+      screen.getByText('This step type is not supported in this SDK version.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/SURVEY/)).not.toBeInTheDocument();
+  });
+});
+
+describe('StepView: checkers the SDK does not handle', () => {
+  const exeCourse = (exeContent: Record<string, unknown>) =>
+    makeCourse([
+      {
+        id: 'step-exe',
+        title: { en: 'Do something on-chain' },
+        type: 'EXE',
+        order: 0,
+        exeContent: {
+          instructions: { en: [] },
+          checkerId: 'checker-1',
+          checkerName: { en: 'On-chain action' },
+          ...exeContent,
+        } as never,
+      },
+    ]);
+
+  const renderExe = (exeContent: Record<string, unknown>) =>
+    render(
+      <StepView
+        course={exeCourse(exeContent)}
+        stepId="step-exe"
+        progress={inProgress}
+        apiClient={makeClient()}
+        linkedWallets={{}}
+        onWalletLinked={vi.fn()}
+        onComplete={vi.fn()}
+      />
+    );
+
+  const expectNoStellarWalletAction = () => {
+    expect(document.querySelector('.venalabs-wallet-linker')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect Wallet' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Link Wallet' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Verify & Complete' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark as complete' })).not.toBeInTheDocument();
+  };
+
+  it('says that a HYPERCORE checker is not supported in this SDK version', () => {
+    renderExe({
+      checkerType: 'HYPERCORE',
+      checkerHypercoreConfig: { network: 'HYPERLIQUID_MAINNET', action: 'TRADED' },
+    });
+
+    expect(
+      screen.getByText('This verification type (HYPERCORE) is not supported in this SDK version.')
+    ).toBeInTheDocument();
+    expectNoStellarWalletAction();
+  });
+
+  it('says that a checker on a non-Stellar network is not supported, without offering a Stellar wallet', () => {
+    mocks.wallet.current.stellarAddress = null;
+    mocks.wallet.current.isConnected = false;
+    renderExe({
+      checkerType: 'BALANCE',
+      checkerBalanceConfig: { network: 'ARBITRUM', tokenCode: 'USDC' },
+    });
+
+    expect(
+      screen.getByText(
+        'This verification targets a network (ARBITRUM) that is not supported in this SDK version.'
+      )
+    ).toBeInTheDocument();
+    expectNoStellarWalletAction();
+  });
+
+  it('applies the same rule to an NFT mint on a non-Stellar network', () => {
+    renderExe({
+      checkerType: 'NFT_MINT',
+      checkerNftMintConfig: { network: 'HYPERLIQUID_MAINNET', contractAddress: '0xabc' },
+    });
+
+    expect(
+      screen.getByText(
+        'This verification targets a network (HYPERLIQUID_MAINNET) that is not supported in this SDK version.'
+      )
+    ).toBeInTheDocument();
+    expectNoStellarWalletAction();
+    expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
+  });
+
+  it('still shows a completed step as completed', () => {
+    const completed: VenalabsProgress = {
+      ...inProgress,
+      stepProgress: [{ stepId: 'step-exe', status: 'COMPLETED' }],
+    };
+    render(
+      <StepView
+        course={exeCourse({ checkerType: 'HYPERCORE' })}
+        stepId="step-exe"
+        progress={completed}
+        apiClient={makeClient()}
+        linkedWallets={{}}
+        onWalletLinked={vi.fn()}
+        onComplete={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Step verified and completed!')).toBeInTheDocument();
+    expect(screen.queryByText(/not supported in this SDK version/)).not.toBeInTheDocument();
   });
 });
