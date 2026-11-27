@@ -111,6 +111,18 @@ export function MapView({
   const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
   const [lastVisitedNodeId, setLastVisitedNodeId] = useState<string | null>(null);
 
+  // Timer of the initial zoom, cancelled when the map is removed before it
+  // fires (the zoom would otherwise run on a DOM that no longer exists)
+  const initialZoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (initialZoomTimerRef.current !== null) {
+        clearTimeout(initialZoomTimerRef.current);
+        initialZoomTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Find selected map or default to first
   const selectedMap = selectedMapId ? maps.find((m) => m.id === selectedMapId) || maps[0] : maps[0];
 
@@ -206,7 +218,11 @@ export function MapView({
     if (!targetNode) return;
 
     const targetId = `venalabs-node-${targetNode.id}`;
-    setTimeout(() => {
+    if (initialZoomTimerRef.current !== null) {
+      clearTimeout(initialZoomTimerRef.current);
+    }
+    initialZoomTimerRef.current = setTimeout(() => {
+      initialZoomTimerRef.current = null;
       instance.zoomToElement(targetId, 0.8, 500);
     }, 100);
   };

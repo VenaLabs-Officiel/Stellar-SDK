@@ -3,7 +3,7 @@
  * Handles checker verification flow with wallet connection/linking
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useStellarWallet } from '../../wallet';
 import { useTranslation } from '../../i18n';
@@ -13,6 +13,15 @@ import { GlassButton } from './GlassCard';
 import { WalletLinker } from './WalletLinker';
 import { NftMintChecker } from './NftMintChecker';
 import type { VenalabsApiClient } from '../../api';
+import {
+  resolveCheckerNetwork,
+  getCheckerConfigNetwork,
+  toCheckerNetwork,
+} from '../../utils/stellarNetworkUtils';
+import { useDeferredCall } from '../../utils/useDeferredCall';
+
+/** Checker types this SDK version can verify */
+const SUPPORTED_CHECKER_TYPES: readonly string[] = ['LINKED', 'BALANCE', 'TRANSACTION', 'NFT_MINT'];
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -56,7 +65,23 @@ export function CheckerVerification({
   onVerificationSuccess,
 }: CheckerVerificationProps): JSX.Element {
   const { t, locale } = useTranslation();
-  const { stellarAddress, isConnected } = useStellarWallet();
+  const { stellarAddress, isConnected, network: configuredNetwork } = useStellarWallet();
+
+  // The network comes from the checker, otherwise from the stellarNetwork prop
+  const networkResolution = resolveCheckerNetwork(checker, configuredNetwork);
+  const checkerNetwork = networkResolution.network;
+  const isNetworkSupported = networkResolution.supported;
+
+  // Signatures always use the network of the checker. Tell the integrator when
+  // the stellarNetwork prop says otherwise, as it is probably a configuration slip.
+  useEffect(() => {
+    if (isNetworkSupported && toCheckerNetwork(configuredNetwork) !== checkerNetwork) {
+      console.warn(
+        `[VenalabsStellarSDK] Checker "${checker.id}" runs on ${checkerNetwork} while the ` +
+          `stellarNetwork prop is "${configuredNetwork}". The checker network is used.`
+      );
+    }
+  }, [isNetworkSupported, configuredNetwork, checkerNetwork, checker.id]);
 
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
@@ -65,6 +90,9 @@ export function CheckerVerification({
     message: string;
     details?: Record<string, string>;
   } | null>(null);
+
+  // Delay before the step is completed; cleared (and run at once) on unmount
+  const deferCall = useDeferredCall();
 
   // Declared before the NFT_MINT early return so hooks run in the same order on every render
   const handleVerify = useCallback(async () => {
@@ -81,9 +109,7 @@ export function CheckerVerification({
           message: result.message || t('verification.passed'),
           details: result.details,
         });
-        setTimeout(() => {
-          onVerificationSuccess();
-        }, 500);
+        deferCall(onVerificationSuccess, 500);
       } else {
         setVerificationError(result.message || t('verification.checkRequirements'));
       }
@@ -92,7 +118,20 @@ export function CheckerVerification({
     }
 
     setVerifying(false);
-  }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
+  }, [apiClient, courseId, stepId, onVerificationSuccess, deferCall, t]);
+
+  // A checker type added to the platform after this SDK version: say so
+  // instead of offering Stellar wallet actions that cannot satisfy it
+  if (!SUPPORTED_CHECKER_TYPES.includes(checker.type)) {
+    return (
+      <UnsupportedChecker
+        checker={checker}
+        locale={locale}
+        isCompleted={isCompleted}
+        message={t('verification.unsupportedChecker', { type: checker.type })}
+      />
+    );
+  }
 
   // For NFT_MINT checkers, use the dedicated component
   if (checker.type === 'NFT_MINT') {
@@ -110,17 +149,17 @@ export function CheckerVerification({
     );
   }
 
-  // Get network from checker config
-  const getCheckerNetwork = (): string => {
-    console.log(checker);
-    if (checker.linkedConfig?.network) return checker.linkedConfig.network;
-    if (checker.balanceConfig?.network) return checker.balanceConfig.network;
-    if (checker.transactionConfig?.network) return checker.transactionConfig.network;
-    return 'STELLAR_PUBLIC';
-  };
-
-  const checkerNetwork = getCheckerNetwork();
-  console.log(checkerNetwork);
+  // A network the SDK does not handle: explicit message, no wallet action
+  if (!isNetworkSupported) {
+    return (
+      <UnsupportedChecker
+        checker={checker}
+        locale={locale}
+        isCompleted={isCompleted}
+        message={t('verification.unsupportedNetwork', { network: checkerNetwork })}
+      />
+    );
+  }
 
   // Check if this checker requires wallet connection
   const requiresWallet =
@@ -212,6 +251,40 @@ export function CheckerVerification({
 }
 
 /**
+ * Displays a checker the SDK cannot verify (unknown type or network)
+ */
+function UnsupportedChecker({
+  checker,
+  locale,
+  isCompleted,
+  message,
+}: {
+  checker: VenalabsChecker;
+  locale: string;
+  isCompleted: boolean;
+  message: string;
+}): JSX.Element {
+  const { t } = useTranslation();
+
+  return (
+    <div className="venalabs-checker-verification">
+      <CheckerInfo checker={checker} locale={locale} />
+      {isCompleted ? (
+        <div className="venalabs-success-banner">
+          <CheckCircle2 className="venalabs-icon-md venalabs-text-success" />
+          <p>{t('verification.stepVerified')}</p>
+        </div>
+      ) : (
+        <div className="venalabs-warning-banner">
+          <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
+          <p>{message}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Displays checker info card
  */
 function CheckerInfo({
@@ -223,13 +296,7 @@ function CheckerInfo({
 }): JSX.Element {
   const { t } = useTranslation();
 
-  const getCheckerNetwork = (): string | null => {
-    if (checker.linkedConfig?.network) return checker.linkedConfig.network;
-    if (checker.balanceConfig?.network) return checker.balanceConfig.network;
-    if (checker.transactionConfig?.network) return checker.transactionConfig.network;
-    if (checker.nftMintConfig?.network) return checker.nftMintConfig.network;
-    return null;
-  };
+  const getCheckerNetwork = (): string | null => getCheckerConfigNetwork(checker) ?? null;
 
   return (
     <div className="venalabs-checker-info">

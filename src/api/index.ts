@@ -7,7 +7,7 @@ export { VenalabsApiClient } from './VenalabsApiClient';
 
 // Error handling
 export { VenalabsApiError, VenalabsErrorCodes } from './errors';
-export type { VenalabsErrorCode } from './errors';
+export type { VenalabsErrorCode, VenalabsApiErrorBody } from './errors';
 
 // Fetch utilities
 export { fetchWithRetry } from './fetchWithRetry';
