@@ -1,0 +1,348 @@
+import { describe, it, expect, vi } from 'vitest';
+import { submitTransaction, waitForTransaction, SorobanSubmitError } from '../sorobanTx';
+import { withTimeout, RpcTimeoutError } from '../withTimeout';
+
+const HASH = 'abc123';
+const noSleep = () => Promise.resolve();
+
+function rateLimited(): Error {
+  return Object.assign(new Error('Request failed with status code 429'), {
+    response: { status: 429 },
+  });
+}
+
+describe('submitTransaction', () => {
+  it('returns once the RPC accepts the transaction (PENDING)', async () => {
+    const sendTransaction = vi.fn().mockResolvedValue({ status: 'PENDING', hash: HASH });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'PENDING'
+    );
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats DUPLICATE as accepted: the transaction is already known to the network', async () => {
+    const sendTransaction = vi.fn().mockResolvedValue({ status: 'DUPLICATE', hash: HASH });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'DUPLICATE'
+    );
+  });
+
+  it('resends on TRY_AGAIN_LATER, then succeeds', async () => {
+    const sendTransaction = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'TRY_AGAIN_LATER', hash: HASH })
+      .mockResolvedValueOnce({ status: 'TRY_AGAIN_LATER', hash: HASH })
+      .mockResolvedValue({ status: 'PENDING', hash: HASH });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'PENDING'
+    );
+    expect(sendTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after a bounded number of TRY_AGAIN_LATER answers', async () => {
+    const sendTransaction = vi.fn().mockResolvedValue({ status: 'TRY_AGAIN_LATER', hash: HASH });
+
+    const error = await submitTransaction(
+      { sendTransaction },
+      {},
+      { sleep: noSleep, maxAttempts: 4 }
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SorobanSubmitError);
+    expect((error as SorobanSubmitError).reason).toBe('BUSY');
+    expect(sendTransaction).toHaveBeenCalledTimes(4);
+  });
+
+  it('throws REJECTED on ERROR without resending', async () => {
+    const sendTransaction = vi.fn().mockResolvedValue({ status: 'ERROR', hash: HASH });
+
+    const error = await submitTransaction({ sendTransaction }, {}, { sleep: noSleep }).catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(SorobanSubmitError);
+    expect((error as SorobanSubmitError).reason).toBe('REJECTED');
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('resends the same signed transaction after a network error', async () => {
+    const sendTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'DUPLICATE', hash: HASH });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'DUPLICATE'
+    );
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not conclude to a failure when ERROR follows a lost answer', async () => {
+    // Attempt 1 reached the network but its answer was lost; attempt 2 is
+    // refused because the sequence number was consumed by attempt 1
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sendTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'ERROR', hash: HASH, errorResult: { code: 'txBadSeq' } });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'UNKNOWN'
+    );
+    // No further resend: the on-chain status decides
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('ERROR'), {
+      code: 'txBadSeq',
+    });
+    errorSpy.mockRestore();
+  });
+
+  it('logs the errorResult of a rejected transaction', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sendTransaction = vi
+      .fn()
+      .mockResolvedValue({ status: 'ERROR', hash: HASH, errorResult: { code: 'txBadAuth' } });
+
+    await expect(
+      submitTransaction({ sendTransaction }, {}, { sleep: noSleep })
+    ).rejects.toMatchObject({ reason: 'REJECTED' });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('ERROR'), {
+      code: 'txBadAuth',
+    });
+    errorSpy.mockRestore();
+  });
+
+  it('reports UNKNOWN when every attempt fails at the network level', async () => {
+    const sendTransaction = vi.fn().mockRejectedValue(new Error('Network Error'));
+
+    await expect(
+      submitTransaction({ sendTransaction }, {}, { sleep: noSleep, maxAttempts: 3 })
+    ).resolves.toBe('UNKNOWN');
+    expect(sendTransaction).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('withTimeout', () => {
+  it('resolves with the value of a call that answers in time', async () => {
+    await expect(withTimeout(Promise.resolve('ok'), 50, 'call')).resolves.toBe('ok');
+  });
+
+  it('keeps the rejection of a call that fails in time', async () => {
+    await expect(withTimeout(Promise.reject(new Error('boom')), 50, 'call')).rejects.toThrow(
+      'boom'
+    );
+  });
+
+  it('rejects with RpcTimeoutError when the call never answers', async () => {
+    const error = await withTimeout(new Promise(() => {}), 10, 'getTransaction').catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(RpcTimeoutError);
+    expect((error as Error).message).toContain('getTransaction');
+  });
+
+  it('does not leave a timer behind once the call has answered', async () => {
+    vi.useFakeTimers();
+    try {
+      await withTimeout(Promise.resolve('ok'), 15000, 'call');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('RPC calls that never answer', () => {
+  const never = () => new Promise<never>(() => {});
+
+  it('treats a sendTransaction without answer as a network error and resends', async () => {
+    const sendTransaction = vi
+      .fn()
+      .mockImplementationOnce(never)
+      .mockResolvedValue({ status: 'DUPLICATE', hash: HASH });
+
+    await expect(
+      submitTransaction({ sendTransaction }, {}, { sleep: noSleep, rpcTimeoutMs: 10 })
+    ).resolves.toBe('DUPLICATE');
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports UNKNOWN, not a failure, when sendTransaction never answers', async () => {
+    const sendTransaction = vi.fn().mockImplementation(never);
+
+    await expect(
+      submitTransaction(
+        { sendTransaction },
+        {},
+        { sleep: noSleep, maxAttempts: 2, rpcTimeoutMs: 10 }
+      )
+    ).resolves.toBe('UNKNOWN');
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('polls again when getTransaction does not answer', async () => {
+    const getTransaction = vi
+      .fn()
+      .mockImplementationOnce(never)
+      .mockResolvedValue({ status: 'SUCCESS' });
+
+    await expect(
+      waitForTransaction({ getTransaction }, HASH, {
+        deadline: 1_000_000,
+        now: () => 0,
+        sleep: noSleep,
+        rpcTimeoutMs: 10,
+      })
+    ).resolves.toBe('SUCCESS');
+    expect(getTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves UNKNOWN at the deadline when getTransaction never answers', async () => {
+    let clock = 0;
+    const getTransaction = vi.fn().mockImplementation(never);
+
+    const outcome = await waitForTransaction({ getTransaction }, HASH, {
+      deadline: 4_000,
+      now: () => clock,
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+      rpcTimeoutMs: 10,
+    });
+
+    expect(outcome).toBe('UNKNOWN');
+  });
+});
+
+describe('waitForTransaction', () => {
+  const farDeadline = () => ({ deadline: 1_000_000, now: () => 0, sleep: noSleep });
+
+  it('resolves SUCCESS when the transaction is confirmed', async () => {
+    const getTransaction = vi.fn().mockResolvedValue({ status: 'SUCCESS' });
+
+    await expect(waitForTransaction({ getTransaction }, HASH, farDeadline())).resolves.toBe(
+      'SUCCESS'
+    );
+    expect(getTransaction).toHaveBeenCalledWith(HASH);
+  });
+
+  it('resolves FAILED when the transaction failed on-chain', async () => {
+    const getTransaction = vi.fn().mockResolvedValue({ status: 'FAILED' });
+
+    await expect(waitForTransaction({ getTransaction }, HASH, farDeadline())).resolves.toBe(
+      'FAILED'
+    );
+  });
+
+  it('keeps polling while the transaction is NOT_FOUND, then resolves SUCCESS', async () => {
+    const getTransaction = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'NOT_FOUND' })
+      .mockResolvedValueOnce({ status: 'NOT_FOUND' })
+      .mockResolvedValue({ status: 'SUCCESS' });
+
+    await expect(waitForTransaction({ getTransaction }, HASH, farDeadline())).resolves.toBe(
+      'SUCCESS'
+    );
+    expect(getTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries on HTTP 429 and network errors instead of failing', async () => {
+    const getTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimited())
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'SUCCESS' });
+
+    await expect(waitForTransaction({ getTransaction }, HASH, farDeadline())).resolves.toBe(
+      'SUCCESS'
+    );
+    expect(getTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits 1.5 s before the first poll and backs off gently, capped at 5 s', async () => {
+    const delays: number[] = [];
+    let polls = 0;
+    const getTransaction = vi.fn().mockImplementation(() => {
+      polls++;
+      return Promise.resolve({ status: polls < 12 ? 'NOT_FOUND' : 'SUCCESS' });
+    });
+
+    await waitForTransaction({ getTransaction }, HASH, {
+      deadline: 1_000_000,
+      now: () => 0,
+      sleep: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(delays[0]).toBe(1500);
+    expect(delays[1]).toBeGreaterThan(1500);
+    expect(delays[1]).toBeLessThanOrEqual(2000);
+    for (let i = 1; i < delays.length; i++) {
+      expect(delays[i]).toBeGreaterThanOrEqual(delays[i - 1] ?? 0);
+      expect(delays[i]).toBeLessThanOrEqual(5000);
+    }
+    expect(delays[delays.length - 1]).toBe(5000);
+  });
+
+  it('resolves EXPIRED as soon as a ledger closed after the transaction time bound', async () => {
+    const getTransaction = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 'NOT_FOUND', latestLedgerCloseTime: 999 })
+      .mockResolvedValue({ status: 'NOT_FOUND', latestLedgerCloseTime: '1001' });
+
+    const outcome = await waitForTransaction({ getTransaction }, HASH, {
+      ...farDeadline(),
+      expiresAtSec: 1000,
+    });
+
+    expect(outcome).toBe('EXPIRED');
+    expect(getTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves UNKNOWN, not EXPIRED, at the deadline when expiry cannot be proven', async () => {
+    let clock = 0;
+    const getTransaction = vi
+      .fn()
+      .mockResolvedValue({ status: 'NOT_FOUND', latestLedgerCloseTime: 500 });
+
+    const outcome = await waitForTransaction({ getTransaction }, HASH, {
+      deadline: 10_000,
+      expiresAtSec: 1000,
+      now: () => clock,
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+    });
+
+    expect(outcome).toBe('UNKNOWN');
+    // Bounded: it stopped polling shortly after the deadline
+    expect(clock).toBeGreaterThanOrEqual(10_000);
+    expect(clock).toBeLessThan(20_000);
+  });
+
+  it('never reports a failure for a transaction whose status could not be read', async () => {
+    let clock = 0;
+    const getTransaction = vi.fn().mockRejectedValue(rateLimited());
+
+    const outcome = await waitForTransaction({ getTransaction }, HASH, {
+      deadline: 6_000,
+      expiresAtSec: 1,
+      now: () => clock,
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+    });
+
+    expect(outcome).toBe('UNKNOWN');
+  });
+});
