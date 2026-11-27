@@ -7,6 +7,7 @@
  */
 
 import { sleep as defaultSleep } from './sleep';
+import { DEFAULT_RPC_TIMEOUT_MS, withTimeout } from './withTimeout';
 
 /** Subset of the Soroban RPC server used to submit a transaction */
 export interface SorobanSender<Tx> {
@@ -45,6 +46,11 @@ export interface SubmitOptions {
   maxAttempts?: number;
   /** Delay before the first resend, multiplied by the attempt number (default: 1500 ms) */
   retryDelayMs?: number;
+  /**
+   * Time allowed for one `sendTransaction` call (default: 15 s). A call
+   * without answer is handled like a network error.
+   */
+  rpcTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -64,18 +70,27 @@ export async function submitTransaction<Tx>(
   tx: Tx,
   options: SubmitOptions = {}
 ): Promise<SorobanSubmitStatus> {
-  const { maxAttempts = 4, retryDelayMs = 1500, sleep = defaultSleep } = options;
+  const {
+    maxAttempts = 4,
+    retryDelayMs = 1500,
+    rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS,
+    sleep = defaultSleep,
+  } = options;
   let networkErrorSeen = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let status: string | null = null;
     let errorResult: unknown;
     try {
-      const response = await server.sendTransaction(tx);
+      const response = await withTimeout(
+        server.sendTransaction(tx),
+        rpcTimeoutMs,
+        'sendTransaction'
+      );
       status = response.status;
       errorResult = response.errorResult;
     } catch (error) {
-      // Network error or HTTP 429: the transaction may or may not have arrived
+      // Network error, HTTP 429 or no answer: the transaction may or may not have arrived
       networkErrorSeen = true;
       console.warn('[sorobanTx] sendTransaction failed, will retry:', error);
     }
@@ -135,6 +150,11 @@ export interface WaitOptions {
   backoffFactor?: number;
   /** Upper bound for the delay between polls (default: 5000 ms) */
   maxIntervalMs?: number;
+  /**
+   * Time allowed for one `getTransaction` call (default: 15 s). A call
+   * without answer is retried on the next tick, like a network error.
+   */
+  rpcTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -142,8 +162,8 @@ export interface WaitOptions {
 /**
  * Poll `getTransaction` until the transaction reaches SUCCESS or FAILED, is
  * proven expired, or until the deadline. A failed poll (HTTP 429, network
- * error) is retried on the next tick and is never reported as a failed
- * transaction.
+ * error, no answer within `rpcTimeoutMs`) is retried on the next tick and is
+ * never reported as a failed transaction.
  */
 export async function waitForTransaction(
   server: SorobanReader,
@@ -156,6 +176,7 @@ export async function waitForTransaction(
     initialIntervalMs = 1500,
     backoffFactor = 1.2,
     maxIntervalMs = 5000,
+    rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS,
     sleep = defaultSleep,
     now = Date.now,
   } = options;
@@ -166,7 +187,11 @@ export async function waitForTransaction(
     await sleep(interval);
 
     try {
-      const response = await server.getTransaction(hash);
+      const response = await withTimeout(
+        server.getTransaction(hash),
+        rpcTimeoutMs,
+        'getTransaction'
+      );
       if (response.status === 'SUCCESS' || response.status === 'FAILED') {
         return response.status;
       }

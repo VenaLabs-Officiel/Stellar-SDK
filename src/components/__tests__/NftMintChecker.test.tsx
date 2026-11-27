@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => {
     serverCtor: vi.fn(),
     txTimeouts: [] as number[],
     signedWith: [] as string[],
-    timing: { txTimeoutSeconds: 180, confirmationGraceMs: 15000 },
+    timing: { txTimeoutSeconds: 180, confirmationGraceMs: 15000, rpcTimeoutMs: 15000 },
     wallet: {
       current: {} as Record<string, unknown>,
     },
@@ -182,7 +182,11 @@ beforeEach(() => {
   api.nftVerifyBodies = [];
   api.voucher = pendingVoucher();
   api.events = [];
-  Object.assign(mocks.timing, { txTimeoutSeconds: 180, confirmationGraceMs: 15000 });
+  Object.assign(mocks.timing, {
+    txTimeoutSeconds: 180,
+    confirmationGraceMs: 15000,
+    rpcTimeoutMs: 15000,
+  });
 
   mocks.serverCtor.mockClear();
   mocks.txTimeouts.length = 0;
@@ -492,6 +496,61 @@ describe('NftMintChecker: transaction confirmation', () => {
 
     expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
     expect(api.nftVerifyBodies).toEqual([{ txHash: TX_HASH }]);
+  });
+});
+
+describe('NftMintChecker: Soroban RPC that does not answer', () => {
+  const never = () => new Promise<never>(() => {});
+
+  it('keeps polling when a getTransaction call never answers', async () => {
+    mocks.timing.rpcTimeoutMs = 20;
+    mocks.rpc.getTransaction
+      .mockReset()
+      .mockImplementationOnce(never)
+      .mockResolvedValue({ status: 'SUCCESS', txHash: TX_HASH });
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(mocks.rpc.getTransaction).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.venalabs-error-banner')).not.toBeInTheDocument();
+  });
+
+  it('moves on to polling when sendTransaction never answers, without reporting a failure', async () => {
+    mocks.timing.rpcTimeoutMs = 20;
+    mocks.rpc.sendTransaction.mockReset().mockImplementation(never);
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(api.nftVerifyBodies).toEqual([{ txHash: TX_HASH }]);
+    expect(document.querySelector('.venalabs-error-banner')).not.toBeInTheDocument();
+  });
+
+  it('gives the button back when the simulation never answers, before anything is signed', async () => {
+    mocks.timing.rpcTimeoutMs = 20;
+    mocks.rpc.simulateTransaction.mockReset().mockImplementation(never);
+    renderChecker();
+    await clickMint();
+
+    expect(
+      await screen.findByText('The mint transaction could not be prepared. Please try again later.')
+    ).toBeInTheDocument();
+    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled();
+  });
+
+  it('gives the button back when the account lookup never answers', async () => {
+    mocks.timing.rpcTimeoutMs = 20;
+    mocks.rpc.getAccount.mockReset().mockImplementation(never);
+    renderChecker();
+    await clickMint();
+
+    expect(
+      await screen.findByText('The mint transaction could not be prepared. Please try again later.')
+    ).toBeInTheDocument();
+    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled();
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { submitTransaction, waitForTransaction, SorobanSubmitError } from '../sorobanTx';
+import { withTimeout, RpcTimeoutError } from '../withTimeout';
 
 const HASH = 'abc123';
 const noSleep = () => Promise.resolve();
@@ -121,6 +122,100 @@ describe('submitTransaction', () => {
       submitTransaction({ sendTransaction }, {}, { sleep: noSleep, maxAttempts: 3 })
     ).resolves.toBe('UNKNOWN');
     expect(sendTransaction).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('withTimeout', () => {
+  it('resolves with the value of a call that answers in time', async () => {
+    await expect(withTimeout(Promise.resolve('ok'), 50, 'call')).resolves.toBe('ok');
+  });
+
+  it('keeps the rejection of a call that fails in time', async () => {
+    await expect(withTimeout(Promise.reject(new Error('boom')), 50, 'call')).rejects.toThrow(
+      'boom'
+    );
+  });
+
+  it('rejects with RpcTimeoutError when the call never answers', async () => {
+    const error = await withTimeout(new Promise(() => {}), 10, 'getTransaction').catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(RpcTimeoutError);
+    expect((error as Error).message).toContain('getTransaction');
+  });
+
+  it('does not leave a timer behind once the call has answered', async () => {
+    vi.useFakeTimers();
+    try {
+      await withTimeout(Promise.resolve('ok'), 15000, 'call');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('RPC calls that never answer', () => {
+  const never = () => new Promise<never>(() => {});
+
+  it('treats a sendTransaction without answer as a network error and resends', async () => {
+    const sendTransaction = vi
+      .fn()
+      .mockImplementationOnce(never)
+      .mockResolvedValue({ status: 'DUPLICATE', hash: HASH });
+
+    await expect(
+      submitTransaction({ sendTransaction }, {}, { sleep: noSleep, rpcTimeoutMs: 10 })
+    ).resolves.toBe('DUPLICATE');
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports UNKNOWN, not a failure, when sendTransaction never answers', async () => {
+    const sendTransaction = vi.fn().mockImplementation(never);
+
+    await expect(
+      submitTransaction(
+        { sendTransaction },
+        {},
+        { sleep: noSleep, maxAttempts: 2, rpcTimeoutMs: 10 }
+      )
+    ).resolves.toBe('UNKNOWN');
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('polls again when getTransaction does not answer', async () => {
+    const getTransaction = vi
+      .fn()
+      .mockImplementationOnce(never)
+      .mockResolvedValue({ status: 'SUCCESS' });
+
+    await expect(
+      waitForTransaction({ getTransaction }, HASH, {
+        deadline: 1_000_000,
+        now: () => 0,
+        sleep: noSleep,
+        rpcTimeoutMs: 10,
+      })
+    ).resolves.toBe('SUCCESS');
+    expect(getTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('resolves UNKNOWN at the deadline when getTransaction never answers', async () => {
+    let clock = 0;
+    const getTransaction = vi.fn().mockImplementation(never);
+
+    const outcome = await waitForTransaction({ getTransaction }, HASH, {
+      deadline: 4_000,
+      now: () => clock,
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+      rpcTimeoutMs: 10,
+    });
+
+    expect(outcome).toBe('UNKNOWN');
   });
 });
 

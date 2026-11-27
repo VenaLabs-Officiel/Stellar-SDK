@@ -6,4 +6,6 @@ export const MINT_TIMING = {
   txTimeoutSeconds: 180,
   /** Time allowed after the transaction expires to read its final status (ms) */
   confirmationGraceMs: 15000,
+  /** Time allowed for one Soroban RPC call before it is treated as a network error (ms) */
+  rpcTimeoutMs: 15000,
 };

@@ -30,6 +30,7 @@ import {
 } from '../../utils/sorobanTx';
 import { MINT_TIMING } from '../../utils/mintTiming';
 import { sleep } from '../../utils/sleep';
+import { RpcTimeoutError, withTimeout } from '../../utils/withTimeout';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -369,7 +370,12 @@ export function NftMintChecker({
         allowHttp: rpcEndpoint.allowHttp,
       });
 
-      const userAccount = await RpcServer.getAccount(stellarAddress);
+      // The RPC client has no timeout: a call without answer must not block the button
+      const userAccount = await withTimeout(
+        RpcServer.getAccount(stellarAddress),
+        MINT_TIMING.rpcTimeoutMs,
+        'getAccount'
+      );
 
       // Convert signature from hex string to Bytes (64 bytes for Ed25519)
       // Use Uint8Array for browser compatibility (Buffer is Node.js only)
@@ -409,7 +415,11 @@ export function NftMintChecker({
         .build();
 
       // 3. Simulate transaction
-      const simResponse = await RpcServer.simulateTransaction(tx);
+      const simResponse = await withTimeout(
+        RpcServer.simulateTransaction(tx),
+        MINT_TIMING.rpcTimeoutMs,
+        'simulateTransaction'
+      );
       if (StellarRpc.Api.isSimulationError(simResponse)) {
         console.error('[NftMintChecker] Simulation failed:', simResponse.error);
         const alreadyUsed = String(simResponse.error).includes('Nonce already used');
@@ -435,7 +445,7 @@ export function NftMintChecker({
 
       // 5. Submit transaction
       try {
-        await submitTransaction(RpcServer, signedTx);
+        await submitTransaction(RpcServer, signedTx, { rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs });
       } catch (submitError) {
         if (submitError instanceof SorobanSubmitError) {
           console.error('[NftMintChecker] Submission failed:', submitError);
@@ -458,14 +468,20 @@ export function NftMintChecker({
       const outcome = await waitForTransaction(RpcServer, hash, {
         deadline: expiresAtSec * 1000 + MINT_TIMING.confirmationGraceMs,
         expiresAtSec,
+        rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs,
       });
 
       // 7. Mark as minted on backend, only once the transaction is confirmed
       await settleTransaction(outcome, { hash, expiresAtSec }, update);
     } catch (error: unknown) {
       console.error('[NftMintChecker] Error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      update(() => setMintError(t('nft.mintingFailed', { error: errorMessage })));
+      if (error instanceof RpcTimeoutError) {
+        // Only the calls made before signing end here: nothing was submitted
+        update(() => setMintError(t('nft.simulationFailed')));
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        update(() => setMintError(t('nft.mintingFailed', { error: errorMessage })));
+      }
     } finally {
       if (mintInFlightRef.current === key) {
         mintInFlightRef.current = null;
@@ -518,6 +534,7 @@ export function NftMintChecker({
       const outcome = await waitForTransaction(reader, pendingTx.hash, {
         deadline: Date.now(),
         expiresAtSec: pendingTx.expiresAtSec,
+        rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs,
       });
       await settleTransaction(outcome, pendingTx, update);
     } catch (error) {
