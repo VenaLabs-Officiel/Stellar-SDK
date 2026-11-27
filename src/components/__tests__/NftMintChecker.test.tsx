@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { VenalabsApiClient } from '../../api';
@@ -178,6 +178,7 @@ afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 
 beforeEach(() => {
+  sessionStorage.clear();
   api.voucherCalls = 0;
   api.nftVerifyBodies = [];
   api.voucher = pendingVoucher();
@@ -248,6 +249,17 @@ function renderChecker(
       {...props}
     />
   );
+}
+
+/** sessionStorage key of the pending mint of the tested step */
+const pendingKey = (address = USER_ADDRESS) =>
+  `venalabs-sdk:pending-mint:${COURSE_ID}:${STEP_ID}:${address}`;
+
+/** Simulate a mint transaction submitted by a previous page load or step visit */
+function storePendingMint(expiresInSec = 180, address = USER_ADDRESS) {
+  const expiresAtSec = Math.floor(Date.now() / 1000) + expiresInSec;
+  sessionStorage.setItem(pendingKey(address), JSON.stringify({ hash: TX_HASH, expiresAtSec }));
+  return expiresAtSec;
 }
 
 async function clickMint() {
@@ -794,6 +806,211 @@ describe('NftMintChecker: completion delay after verification', () => {
     expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
     await new Promise((resolve) => setTimeout(resolve, 700));
     expect(onVerificationSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('NftMintChecker: submitted transaction kept across reloads', () => {
+  it('stores the hash and expiry before the transaction is sent, and forgets them once the mint is recorded', async () => {
+    let storedAtSend: string | null = null;
+    mocks.rpc.sendTransaction.mockReset().mockImplementation(() => {
+      storedAtSend = sessionStorage.getItem(pendingKey());
+      return Promise.resolve({ status: 'PENDING', hash: TX_HASH });
+    });
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    const stored = JSON.parse(storedAtSend!) as { hash: string; expiresAtSec: number };
+    expect(stored.hash).toBe(TX_HASH);
+    expect(stored.expiresAtSec).toBeGreaterThan(Date.now() / 1000);
+    expect(stored.expiresAtSec).toBeLessThanOrEqual(Date.now() / 1000 + 181);
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('keeps nothing when nothing was sent (simulation failure, rejected submission)', async () => {
+    mocks.rpc.sendTransaction.mockResolvedValue({ status: 'ERROR', hash: TX_HASH });
+    renderChecker();
+    await clickMint();
+
+    await screen.findByText('Transaction failed. Please try again.');
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('resumes a stored transaction at mount and records it once confirmed, without a new mint', async () => {
+    storePendingMint();
+    mockTxStatuses(['NOT_FOUND', 'SUCCESS']);
+    renderChecker();
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(mocks.rpc.getTransaction).toHaveBeenCalledWith(TX_HASH);
+    expect(api.nftVerifyBodies).toEqual([{ txHash: TX_HASH }]);
+    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+    expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
+  });
+
+  it('does not offer a new mint while a stored transaction is still being confirmed', async () => {
+    storePendingMint();
+    let confirmed = false;
+    mocks.rpc.getTransaction
+      .mockReset()
+      .mockImplementation(() =>
+        Promise.resolve({ status: confirmed ? 'SUCCESS' : 'NOT_FOUND', txHash: TX_HASH })
+      );
+    renderChecker();
+
+    expect(await screen.findByRole('button', { name: 'Confirming...' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
+
+    confirmed = true;
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('follows the same transaction when the step is left and opened again during "Confirming..."', async () => {
+    let confirmed = false;
+    mocks.rpc.getTransaction
+      .mockReset()
+      .mockImplementation(() =>
+        Promise.resolve({ status: confirmed ? 'SUCCESS' : 'NOT_FOUND', txHash: TX_HASH })
+      );
+
+    const first = renderChecker();
+    await clickMint();
+    await screen.findByRole('button', { name: 'Confirming...' });
+
+    // The user goes to another step and comes back: a new instance is mounted
+    first.unmount();
+    renderChecker();
+
+    expect(await screen.findByRole('button', { name: 'Confirming...' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
+
+    confirmed = true;
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    // One signature and one submission in total
+    expect(mocks.wallet.current.signTransaction).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(new Set(api.nftVerifyBodies.map((body) => body.txHash))).toEqual(new Set([TX_HASH]));
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('forgets a stored transaction that FAILED and offers the mint again', async () => {
+    storePendingMint();
+    mockTxStatuses(['FAILED']);
+    renderChecker();
+
+    expect(
+      await screen.findByText('The mint transaction failed on-chain. Please try again.')
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Mint NFT' })).toBeEnabled();
+    expect(api.nftVerifyBodies).toEqual([]);
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('forgets a stored transaction that expired and offers the mint again', async () => {
+    const expiresAtSec = storePendingMint(-600);
+    mockTxStatuses(['NOT_FOUND'], expiresAtSec + 300);
+    renderChecker();
+
+    // Not offered until the stored transaction has been checked
+    expect(await screen.findByRole('button', { name: 'Mint NFT' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled());
+    expect(mocks.rpc.getTransaction).toHaveBeenCalledWith(TX_HASH);
+    expect(api.nftVerifyBodies).toEqual([]);
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+    // After a reload the RPC may simply have forgotten an old transaction:
+    // the SDK does not claim that nothing was minted
+    expect(screen.queryByText(/Nothing was minted/)).not.toBeInTheDocument();
+  });
+
+  it('offers "Check status" when the status of a stored transaction cannot be read', async () => {
+    storePendingMint(-600);
+    mockTxStatuses([rateLimited()]);
+    renderChecker();
+
+    expect(
+      await screen.findByText(/The transaction has not been confirmed yet/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeDisabled();
+    expect(api.nftVerifyBodies).toEqual([]);
+    // Still remembered for the next visit
+    expect(sessionStorage.getItem(pendingKey())).not.toBeNull();
+
+    mockTxStatuses(['SUCCESS']);
+    fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('ignores the transaction stored for another wallet', async () => {
+    storePendingMint(180, 'GOTHERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOTHER');
+    renderChecker();
+
+    expect(await screen.findByRole('button', { name: 'Mint NFT' })).toBeEnabled();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mocks.rpc.getTransaction).not.toHaveBeenCalled();
+  });
+
+  it('forgets a stored transaction once the voucher is already recorded as MINTED', async () => {
+    storePendingMint();
+    api.voucher = pendingVoucher({ status: 'MINTED', txHash: TX_HASH });
+    renderChecker();
+
+    expect(await screen.findByText('NFT already minted!')).toBeInTheDocument();
+    await waitFor(() => expect(sessionStorage.getItem(pendingKey())).toBeNull());
+    expect(mocks.rpc.getTransaction).not.toHaveBeenCalled();
+    expect(api.nftVerifyBodies).toEqual([]);
+  });
+
+  it('resumes once the wallet is connected again after a reload', async () => {
+    storePendingMint();
+    // After a reload the wallet is not connected yet
+    const connected = mocks.wallet.current;
+    mocks.wallet.current = { ...connected, stellarAddress: null, isConnected: false };
+    const view = renderChecker();
+    await screen.findByRole('button', { name: 'Mint NFT' });
+    expect(mocks.rpc.getTransaction).not.toHaveBeenCalled();
+
+    mocks.wallet.current = connected;
+    view.rerender(
+      <NftMintChecker
+        apiClient={makeClient()}
+        courseId={COURSE_ID}
+        stepId={STEP_ID}
+        checker={makeChecker()}
+        isCompleted={false}
+        linkedWalletAddress={USER_ADDRESS}
+        onWalletLinked={() => {}}
+        onVerificationSuccess={() => {}}
+      />
+    );
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('mints normally when sessionStorage is unavailable', async () => {
+    const denied = () => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    };
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(denied);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(denied);
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(denied);
+    try {
+      renderChecker();
+      await clickMint();
+
+      expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+      expect(setItem).toHaveBeenCalled();
+      expect(document.querySelector('.venalabs-error-banner')).not.toBeInTheDocument();
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+      removeItem.mockRestore();
+    }
   });
 });
 

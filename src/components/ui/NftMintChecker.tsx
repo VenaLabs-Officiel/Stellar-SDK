@@ -3,7 +3,7 @@
  * Handles the complete NFT minting flow: voucher → mint → verify
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, AlertCircle, CheckCircle2, ExternalLink, Wallet } from 'lucide-react';
 import { useStellarWallet } from '../../wallet';
 import { useTranslation } from '../../i18n';
@@ -32,6 +32,12 @@ import { MINT_TIMING } from '../../utils/mintTiming';
 import { sleep } from '../../utils/sleep';
 import { RpcTimeoutError, withTimeout } from '../../utils/withTimeout';
 import { useDeferredCall } from '../../utils/useDeferredCall';
+import {
+  pendingMintKey,
+  loadPendingMint,
+  savePendingMint,
+  clearPendingMint,
+} from '../../utils/pendingMintStorage';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -48,6 +54,10 @@ type MintPhase = 'idle' | 'preparing' | 'signing' | 'confirming';
 interface SubmittedTx {
   hash: string;
   expiresAtSec: number;
+  /** sessionStorage key under which the transaction is remembered, if any */
+  storageKey: string | null;
+  /** True when the transaction was found in sessionStorage (page reload, step opened again) */
+  resumed?: boolean;
 }
 
 export interface NftMintCheckerProps {
@@ -92,6 +102,11 @@ function formatAddress(address: string): string {
  *    transaction -> submits it -> waits for its on-chain confirmation ->
  *    records the mint on the backend
  * 3. User clicks Verify to complete the step
+ *
+ * A signed transaction reaches the network even if the page is reloaded or the
+ * step is left before its confirmation. Its hash is therefore kept in
+ * sessionStorage from just before it is sent until the mint is recorded, and
+ * the step resumes its tracking instead of offering a second mint.
  */
 export function NftMintChecker({
   apiClient,
@@ -155,6 +170,15 @@ export function NftMintChecker({
   // Step for which a mint operation is running (prevents a second submission)
   const mintInFlightRef = useRef<string | null>(null);
 
+  // Transaction submitted earlier for this step and wallet (previous page load,
+  // or this step left and opened again), read synchronously so that the mint
+  // button is never offered while it has not been taken over
+  const storageKey = stellarAddress ? pendingMintKey(courseId, stepId, stellarAddress) : null;
+  const storedTx = useMemo(() => (storageKey ? loadPendingMint(storageKey) : null), [storageKey]);
+  // Storage key whose stored transaction has been taken over by this instance
+  const [resumedKey, setResumedKey] = useState<string | null>(null);
+  const awaitingResume = !!storedTx && resumedKey !== storageKey;
+
   // The network comes from the checker, otherwise from the stellarNetwork prop
   const networkResolution = resolveCheckerNetwork(checker, configuredNetwork);
   const checkerNetwork = networkResolution.network;
@@ -182,6 +206,7 @@ export function NftMintChecker({
     setTxHash(null);
     setPendingTx(null);
     setUnrecordedHash(null);
+    setResumedKey(null);
     setVerifying(false);
     setVerificationError(null);
     setVerificationSuccess(false);
@@ -257,6 +282,10 @@ export function NftMintChecker({
       if (outcome === 'SUCCESS') {
         // The backend is only told about a mint that is confirmed on-chain
         const recorded = await recordMint(hash);
+        // Remembered until it is recorded, even if this component is gone
+        if (recorded && tx.storageKey) {
+          clearPendingMint(tx.storageKey);
+        }
         update(() => {
           setPendingTx(null);
           setTxHash(hash);
@@ -270,13 +299,23 @@ export function NftMintChecker({
         return;
       }
 
+      // A transaction that failed or expired will never mint: forget it
+      if ((outcome === 'FAILED' || outcome === 'EXPIRED') && tx.storageKey) {
+        clearPendingMint(tx.storageKey);
+      }
+
       update(() => {
         if (outcome === 'FAILED') {
           setPendingTx(null);
           setMintError(t('nft.transactionFailedOnChain'));
         } else if (outcome === 'EXPIRED') {
           setPendingTx(null);
-          setMintError(t('nft.transactionExpired'));
+          // For a transaction found in storage, "not found after its expiry"
+          // may also mean that the RPC no longer keeps it: the mint is offered
+          // again without claiming that nothing was minted
+          if (!tx.resumed) {
+            setMintError(t('nft.transactionExpired'));
+          }
         } else {
           // Status unknown: keep the transaction so it can be checked again
           setPendingTx(tx);
@@ -299,6 +338,7 @@ export function NftMintChecker({
     const update = (fn: () => void) => {
       if (isActive()) fn();
     };
+    const mintStorageKey = pendingMintKey(courseId, stepId, stellarAddress);
 
     setMintLoading(true);
     setMintPhase('preparing');
@@ -443,8 +483,19 @@ export function NftMintChecker({
       const signedTx = new Transaction(signedTxXdr, passphrase);
       const hash = signedTx.hash().toString('hex');
 
+      const maxTime = Number(signedTx.timeBounds?.maxTime);
+      const expiresAtSec =
+        Number.isFinite(maxTime) && maxTime > 0
+          ? maxTime
+          : Math.ceil(builtAtMs / 1000) + MINT_TIMING.txTimeoutSeconds;
+      const submittedTx: SubmittedTx = { hash, expiresAtSec, storageKey: mintStorageKey };
+
       // From here the transaction may reach the network: the flow runs to its
       // end even if the component unmounts, so a confirmed mint is recorded.
+      // The hash is stored first, so a reload does not lose track of it either.
+      if (mintStorageKey) {
+        savePendingMint(mintStorageKey, { hash, expiresAtSec });
+      }
       update(() => setMintPhase('confirming'));
 
       // 5. Submit transaction
@@ -452,6 +503,10 @@ export function NftMintChecker({
         await submitTransaction(RpcServer, signedTx, { rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs });
       } catch (submitError) {
         if (submitError instanceof SorobanSubmitError) {
+          // Refused or never queued: this transaction will not run
+          if (mintStorageKey) {
+            clearPendingMint(mintStorageKey);
+          }
           console.error('[NftMintChecker] Submission failed:', submitError);
           update(() =>
             setMintError(
@@ -464,11 +519,6 @@ export function NftMintChecker({
       }
 
       // 6. Wait for the on-chain result: sendTransaction only queues the transaction
-      const maxTime = Number(signedTx.timeBounds?.maxTime);
-      const expiresAtSec =
-        Number.isFinite(maxTime) && maxTime > 0
-          ? maxTime
-          : Math.ceil(builtAtMs / 1000) + MINT_TIMING.txTimeoutSeconds;
       const outcome = await waitForTransaction(RpcServer, hash, {
         deadline: expiresAtSec * 1000 + MINT_TIMING.confirmationGraceMs,
         expiresAtSec,
@@ -476,7 +526,7 @@ export function NftMintChecker({
       });
 
       // 7. Mark as minted on backend, only once the transaction is confirmed
-      await settleTransaction(outcome, { hash, expiresAtSec }, update);
+      await settleTransaction(outcome, submittedTx, update);
     } catch (error: unknown) {
       console.error('[NftMintChecker] Error:', error);
       if (error instanceof RpcTimeoutError) {
@@ -511,48 +561,89 @@ export function NftMintChecker({
     rpcUrlOverride,
   ]);
 
+  // Read the status of a transaction that was already submitted, then apply it.
+  // `untilExpiry` keeps polling until the transaction can no longer be included;
+  // otherwise a single poll is made.
+  const trackSubmittedTx = useCallback(
+    async (tx: SubmittedTx, untilExpiry: boolean) => {
+      const key = stepKey;
+      if (mintInFlightRef.current === key) return;
+      mintInFlightRef.current = key;
+
+      const update = (fn: () => void) => {
+        if (isMountedRef.current && stepKeyRef.current === key) fn();
+      };
+
+      setMintLoading(true);
+      setMintPhase('confirming');
+      setMintError(null);
+
+      try {
+        const { rpc: StellarRpc } = await import('@stellar/stellar-sdk');
+        const rpcEndpoint = resolveSorobanRpc(checkerNetwork, rpcUrlOverride);
+        const reader: SorobanReader = new StellarRpc.Server(rpcEndpoint.url, {
+          allowHttp: rpcEndpoint.allowHttp,
+        });
+
+        // Once the transaction has expired, any readable answer is final: a
+        // deadline that is already passed means a single poll
+        const expiryDeadline = tx.expiresAtSec * 1000 + MINT_TIMING.confirmationGraceMs;
+        const outcome = await waitForTransaction(reader, tx.hash, {
+          deadline: untilExpiry ? Math.max(Date.now(), expiryDeadline) : Date.now(),
+          expiresAtSec: tx.expiresAtSec,
+          rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs,
+        });
+        await settleTransaction(outcome, tx, update);
+      } catch (error) {
+        console.error('[NftMintChecker] Status check failed:', error);
+        // Never lose track of the transaction: it can be checked again
+        update(() => setPendingTx(tx));
+      } finally {
+        if (mintInFlightRef.current === key) {
+          mintInFlightRef.current = null;
+        }
+        update(() => {
+          setMintLoading(false);
+          setMintPhase('idle');
+        });
+      }
+    },
+    [stepKey, checkerNetwork, rpcUrlOverride, settleTransaction]
+  );
+
   // Check again a submitted transaction whose status is still unknown
   const handleCheckPending = useCallback(async () => {
     if (!pendingTx) return;
+    await trackSubmittedTx(pendingTx, false);
+  }, [pendingTx, trackSubmittedTx]);
 
-    const key = stepKey;
-    if (mintInFlightRef.current === key) return;
-    mintInFlightRef.current = key;
+  // Take over the transaction submitted earlier for this step and wallet
+  // instead of offering a new mint
+  useEffect(() => {
+    if (!storageKey || !storedTx || resumedKey === storageKey) return;
+    if (isCompleted || !isNetworkSupported || voucherLoading) return;
+    // This instance is already following a transaction of its own
+    if (mintInFlightRef.current === stepKey) return;
 
-    const update = (fn: () => void) => {
-      if (isMountedRef.current && stepKeyRef.current === key) fn();
-    };
-
-    setMintLoading(true);
-    setMintPhase('confirming');
-    setMintError(null);
-
-    try {
-      const { rpc: StellarRpc } = await import('@stellar/stellar-sdk');
-      const rpcEndpoint = resolveSorobanRpc(checkerNetwork, rpcUrlOverride);
-      const reader: SorobanReader = new StellarRpc.Server(rpcEndpoint.url, {
-        allowHttp: rpcEndpoint.allowHttp,
-      });
-
-      // A single poll: once the transaction has expired, any readable answer is final
-      const outcome = await waitForTransaction(reader, pendingTx.hash, {
-        deadline: Date.now(),
-        expiresAtSec: pendingTx.expiresAtSec,
-        rpcTimeoutMs: MINT_TIMING.rpcTimeoutMs,
-      });
-      await settleTransaction(outcome, pendingTx, update);
-    } catch (error) {
-      console.error('[NftMintChecker] Status check failed:', error);
-    } finally {
-      if (mintInFlightRef.current === key) {
-        mintInFlightRef.current = null;
-      }
-      update(() => {
-        setMintLoading(false);
-        setMintPhase('idle');
-      });
+    setResumedKey(storageKey);
+    if (voucherData?.status === 'MINTED') {
+      // Already recorded (by the flow that submitted it): nothing left to follow
+      clearPendingMint(storageKey);
+      return;
     }
-  }, [pendingTx, stepKey, checkerNetwork, rpcUrlOverride, settleTransaction]);
+    void trackSubmittedTx({ ...storedTx, storageKey, resumed: true }, true);
+  }, [
+    storageKey,
+    storedTx,
+    resumedKey,
+    isCompleted,
+    isNetworkSupported,
+    voucherLoading,
+    voucherData,
+    mintLoading,
+    stepKey,
+    trackSubmittedTx,
+  ]);
 
   // Retry recording a mint that is confirmed on-chain
   const handleRetryRecord = useCallback(async () => {
@@ -568,14 +659,18 @@ export function NftMintChecker({
 
     setMintLoading(true);
     try {
-      await settleTransaction('SUCCESS', { hash: unrecordedHash, expiresAtSec: 0 }, update);
+      await settleTransaction(
+        'SUCCESS',
+        { hash: unrecordedHash, expiresAtSec: 0, storageKey },
+        update
+      );
     } finally {
       if (mintInFlightRef.current === key) {
         mintInFlightRef.current = null;
       }
       update(() => setMintLoading(false));
     }
-  }, [unrecordedHash, stepKey, settleTransaction]);
+  }, [unrecordedHash, stepKey, storageKey, settleTransaction]);
 
   // Handle verify
   const handleVerify = useCallback(async () => {
@@ -840,7 +935,9 @@ export function NftMintChecker({
             <GlassButton
               variant="secondary"
               onClick={() => void handleMint()}
-              disabled={mintLoading || !canMintOrVerify || mintDone || !!pendingTx}
+              disabled={
+                mintLoading || !canMintOrVerify || mintDone || !!pendingTx || awaitingResume
+              }
             >
               {mintLoading && !mintDone && (
                 <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />
