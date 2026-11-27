@@ -257,11 +257,7 @@ export type ActionError = {
 };
 
 export function isActionError(response: unknown): response is ActionError {
-  return (
-    response !== null &&
-    typeof response === 'object' &&
-    'error' in response
-  );
+  return response !== null && typeof response === 'object' && 'error' in response;
 }
 
 // Course Card Status (for UI)

@@ -56,7 +56,7 @@ export interface VenalabsStellarSDKProps {
    * ```
    */
   getAccessToken: TokenProvider;
-  /** Language for UI (default: "fr") */
+  /** Language for UI (default: "en") */
   lang?: 'fr' | 'en';
   /** Stellar network for wallet operations (default: "TESTNET") */
   stellarNetwork?: StellarNetwork;
@@ -236,7 +236,7 @@ function VenalabsStellarSDKProvider({
 
   // Wallet linked handler
   const onWalletLinked = useCallback((address: string, network: string) => {
-    setLinkedWallets(prev => ({ ...prev, [network]: address }));
+    setLinkedWallets((prev) => ({ ...prev, [network]: address }));
   }, []);
 
   // Fetch linked wallet helper
@@ -339,14 +339,14 @@ function VenalabsStellarSDKProvider({
       try {
         await Promise.all([refreshMaps(), refreshProgress()]);
         // Fetch linked wallet after auth is verified (maps/progress succeeded)
-        fetchLinkedWallet();
+        void fetchLinkedWallet();
       } catch (err) {
         // Error is already set in refreshMaps
       } finally {
         setLoading(false);
       }
     };
-    init();
+    void init();
   }, [refreshMaps, refreshProgress, fetchLinkedWallet]);
 
   // SDK context value
@@ -431,7 +431,7 @@ function SDKRouter() {
       setCurrentCourse(course);
       setCourseLoading(false);
     };
-    loadCourse();
+    void loadCourse();
   }, [view, getCourse]);
 
   // Handle node click from map
@@ -526,7 +526,7 @@ function SDKRouter() {
 
   // Error state
   if (error) {
-    return <SDKErrorView error={error} onRetry={refreshMaps} />;
+    return <SDKErrorView error={error} onRetry={() => void refreshMaps()} />;
   }
 
   // Map view

@@ -247,6 +247,7 @@ export function StepView({
       <GlassCard className="venalabs-step-view__content">
         <StepContent
           step={currentStep}
+          // eslint-disable-next-line @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
           onComplete={handleComplete}
           isCompleted={isCompleted}
           locale={locale}

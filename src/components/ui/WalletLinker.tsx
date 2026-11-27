@@ -96,7 +96,15 @@ export function WalletLinker({
     }
 
     setLinking(false);
-  }, [stellarAddress, apiClient, signMessage, network, onWalletLinked, setLinkedWalletForNetwork, t]);
+  }, [
+    stellarAddress,
+    apiClient,
+    signMessage,
+    network,
+    onWalletLinked,
+    setLinkedWalletForNetwork,
+    t,
+  ]);
 
   // Format address for display
   const formatAddress = (address: string) => {
@@ -113,7 +121,7 @@ export function WalletLinker({
           {!isConnected ? (
             <GlassButton
               variant="secondary"
-              onClick={handleConnect}
+              onClick={() => void handleConnect()}
               disabled={isConnecting}
               className="venalabs-wallet-linker__connect-btn"
             >
@@ -151,7 +159,7 @@ export function WalletLinker({
           {isConnected && !isLinked && (
             <GlassButton
               variant="secondary"
-              onClick={handleLinkWallet}
+              onClick={() => void handleLinkWallet()}
               disabled={linking}
               className="venalabs-wallet-linker__link-btn"
             >

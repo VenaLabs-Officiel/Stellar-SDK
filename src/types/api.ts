@@ -80,7 +80,10 @@ export interface SdkExeCompletionRequest {
 /**
  * Combined request for step completion
  */
-export type SdkStepCompletionRequest = SdkQuizAnswerRequest | SdkExeCompletionRequest | Record<string, never>;
+export type SdkStepCompletionRequest =
+  | SdkQuizAnswerRequest
+  | SdkExeCompletionRequest
+  | Record<string, never>;
 
 /**
  * API error response structure from backend

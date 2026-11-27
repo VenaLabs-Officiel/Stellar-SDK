@@ -112,7 +112,8 @@ const translations = {
     // Verification
     'verification.failed': 'La vérification a échoué. Veuillez réessayer.',
     'verification.passed': 'Vérification réussie !',
-    'verification.checkRequirements': 'La vérification a échoué. Vérifiez les conditions et réessayez.',
+    'verification.checkRequirements':
+      'La vérification a échoué. Vérifiez les conditions et réessayez.',
     'verification.connectWallet': 'Connectez votre portefeuille pour activer la vérification',
     'verification.linkWallet': 'Liez votre portefeuille pour activer la vérification',
     'verification.stepVerified': 'Étape vérifiée et complétée !',

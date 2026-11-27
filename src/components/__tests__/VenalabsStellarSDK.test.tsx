@@ -6,7 +6,7 @@ import { VenalabsStellarSDK } from '../VenalabsStellarSDK';
 import type { VenalabsMap, VenalabsCourse, VenalabsProgress } from '../../types';
 
 // Helper to create a token provider
-const createTokenProvider = (token: string) => async () => token;
+const createTokenProvider = (token: string) => () => Promise.resolve(token);
 
 // Mock data
 const mockMaps: VenalabsMap[] = [
@@ -67,10 +67,7 @@ const mockCourse: VenalabsCourse = {
       order: 1,
       quizContent: {
         question: { en: 'What is Web3?', fr: "Qu'est-ce que le Web3?" },
-        options: [
-          { text: { en: 'A web framework' } },
-          { text: { en: 'Decentralized internet' } },
-        ],
+        options: [{ text: { en: 'A web framework' } }, { text: { en: 'Decentralized internet' } }],
         correctOptionIndex: 1,
       },
     },
@@ -133,6 +130,11 @@ const server = setupServer(
   // GET /progress/:courseId
   http.get(`${BASE_URL}/api/v1/sdk/progress/:courseId`, () => {
     return HttpResponse.json(null, { status: 404 });
+  }),
+
+  // GET /wallet (no wallet linked yet)
+  http.get(`${BASE_URL}/api/v1/sdk/wallet`, () => {
+    return HttpResponse.json({ walletAddresses: {} });
   })
 );
 
@@ -142,7 +144,7 @@ afterEach(() => server.resetHandlers());
 
 describe('VenalabsStellarSDK', () => {
   describe('Props', () => {
-    it('should render with required props', async () => {
+    it('should render with required props', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -155,7 +157,7 @@ describe('VenalabsStellarSDK', () => {
       expect(document.querySelector('.venalabs-sdk-container')).toBeInTheDocument();
     });
 
-    it('should accept optional lang prop (default: fr)', async () => {
+    it('should accept optional lang prop (default: en)', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -168,7 +170,7 @@ describe('VenalabsStellarSDK', () => {
       expect(document.querySelector('.venalabs-sdk-container')).toBeInTheDocument();
     });
 
-    it('should accept optional minHeight prop', async () => {
+    it('should accept optional minHeight prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -182,7 +184,7 @@ describe('VenalabsStellarSDK', () => {
       expect(container).toHaveStyle({ minHeight: '800px' });
     });
 
-    it('should accept string minHeight prop', async () => {
+    it('should accept string minHeight prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -196,7 +198,7 @@ describe('VenalabsStellarSDK', () => {
       expect(container).toHaveStyle({ minHeight: '50vh' });
     });
 
-    it('should accept optional className prop', async () => {
+    it('should accept optional className prop', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -320,7 +322,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -347,7 +349,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -374,7 +376,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -398,7 +400,7 @@ describe('VenalabsStellarSDK', () => {
   });
 
   describe('Internationalization', () => {
-    it('should display content in French by default', async () => {
+    it('should display content in English by default', async () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -408,7 +410,7 @@ describe('VenalabsStellarSDK', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('Introduction au Web3')).toBeInTheDocument();
+        expect(screen.getByText('Introduction to Web3')).toBeInTheDocument();
       });
     });
 
@@ -446,7 +448,7 @@ describe('VenalabsStellarSDK', () => {
   });
 
   describe('Responsive Layout', () => {
-    it('should have width: 100% on container', async () => {
+    it('should have width: 100% on container', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"

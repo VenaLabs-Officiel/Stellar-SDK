@@ -64,7 +64,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/VenaLabs/Stellar-SDK"
+    "url": "git+https://github.com/VenaLabs-Officiel/Stellar-SDK"
   },
   "keywords": [
     "stellar",
@@ -75,8 +75,11 @@
   ],
   "author": "Venalabs",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
-    "url": "https://github.com/VenaLabs/Stellar-SDK/issues"
+    "url": "https://github.com/VenaLabs-Officiel/Stellar-SDK/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -84,5 +87,5 @@
   "sideEffects": [
     "*.css"
   ],
-  "homepage": "https://github.com/VenaLabs/Stellar-SDK#readme"
+  "homepage": "https://github.com/VenaLabs-Officiel/Stellar-SDK#readme"
 }
