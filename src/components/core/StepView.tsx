@@ -103,7 +103,6 @@ export function StepView({
     if (!currentStep || currentStep.type !== 'EXE' || !currentStep.exeContent?.checkerType) {
       return null;
     }
-    console.log(currentStep);
     return {
       id: currentStep.exeContent.checkerId || '',
       organizationId: course?.organizationId || '',
@@ -245,7 +244,9 @@ export function StepView({
 
       {/* Step content */}
       <GlassCard className="venalabs-step-view__content">
+        {/* Keyed by step: each step gets a fresh instance and never inherits local state */}
         <StepContent
+          key={currentStep.id}
           step={currentStep}
           // eslint-disable-next-line @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
           onComplete={handleComplete}
