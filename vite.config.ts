@@ -43,7 +43,8 @@ export default defineConfig({
         },
       },
     },
-    sourcemap: true,
+    // Source maps are not published: they tripled the size of the package
+    sourcemap: false,
   },
   resolve: {
     alias: {

@@ -11,7 +11,7 @@ import { useTranslation } from '../../i18n';
 import { GlassButton } from './GlassCard';
 import type { VenalabsApiClient } from '../../api';
 
-import { getNetworkPassphrase } from '../../utils/stellarNetworkUtils';
+import { getNetworkPassphrase, findWalletNetworkMismatch } from '../../utils/stellarNetworkUtils';
 
 export interface WalletLinkerProps {
   /** API client instance for making wallet API calls */
@@ -34,13 +34,15 @@ export function WalletLinker({
   onWalletLinked,
 }: WalletLinkerProps): JSX.Element {
   const { t } = useTranslation();
-  const { stellarAddress, isConnected, isConnecting, connect } = useStellarWallet();
-  const { signMessage } = useStellarWallet();
+  const { stellarAddress, isConnected, isConnecting, connect, signMessage, getWalletNetwork } =
+    useStellarWallet();
 
-  const { setLinkedWalletForNetwork } = useWalletStore();
+  const { setLinkedWalletForNetwork, connectionError } = useWalletStore();
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Name of the network selected in the wallet when it differs from `network`
+  const [mismatchedNetwork, setMismatchedNetwork] = useState<string | null>(null);
 
   const isLinked = linkedWalletAddress && linkedWalletAddress === stellarAddress;
   const hasOtherLinkedWallet = linkedWalletAddress && linkedWalletAddress !== stellarAddress;
@@ -61,8 +63,22 @@ export function WalletLinker({
 
     setLinking(true);
     setError(null);
+    setMismatchedNetwork(null);
 
     try {
+      // The passphrase comes from the network of the checker; an unknown
+      // network stops here with an explicit error
+      const passphrase = getNetworkPassphrase(network);
+
+      // Linking only signs a message, which works whatever network the wallet
+      // is set to: a different network is reported, without blocking. Signing a
+      // transaction (NFT mint) is where the network is enforced.
+      try {
+        setMismatchedNetwork(await findWalletNetworkMismatch(getWalletNetwork, network));
+      } catch (networkError) {
+        console.warn('[WalletLinker] Could not read the wallet network:', networkError);
+      }
+
       // 1. Get nonce from backend
       const nonceResponse = await apiClient.getWalletNonce(stellarAddress);
 
@@ -75,7 +91,7 @@ export function WalletLinker({
         `Nonce: ${nonceResponse.nonce}`;
 
       // 3. Sign message with wallet
-      const signature = await signMessage(formattedMessage, getNetworkPassphrase(network));
+      const signature = await signMessage(formattedMessage, passphrase);
 
       // 4. Link wallet on backend
       const linkResponse = await apiClient.linkStellarWallet(stellarAddress, signature, network);
@@ -100,6 +116,7 @@ export function WalletLinker({
     stellarAddress,
     apiClient,
     signMessage,
+    getWalletNetwork,
     network,
     onWalletLinked,
     setLinkedWalletForNetwork,
@@ -190,8 +207,20 @@ export function WalletLinker({
         </div>
       )}
 
+      {/* Wallet set to another network: a warning, linking is not blocked */}
+      {mismatchedNetwork && (
+        <div className="venalabs-wallet-linker__network-warning" role="status">
+          {t('wallet.networkMismatchLinkWarning', {
+            actual: mismatchedNetwork,
+            expected: network,
+          })}
+        </div>
+      )}
+
       {/* Error message */}
-      {error && <div className="venalabs-wallet-linker__error">{error}</div>}
+      {(error || (!isConnected && connectionError)) && (
+        <div className="venalabs-wallet-linker__error">{error || t('wallet.connectionFailed')}</div>
+      )}
     </div>
   );
 }

@@ -60,7 +60,7 @@ export interface VenalabsStepReward {
 }
 
 // Course Types
-export type VenalabsStepType = 'TEXT' | 'VIDEO' | 'QUIZ' | 'EXE' | 'REWARD';
+export type VenalabsStepType = 'TEXT' | 'VIDEO' | 'QUIZ' | 'EXE' | 'REWARD' | 'CERTIFICATE';
 export type VenalabsCourseStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 
 export interface VenalabsTextContent {
@@ -126,7 +126,12 @@ export interface VenalabsCourse {
 }
 
 // Checker Types
-export type VenalabsCheckerType = 'LINKED' | 'BALANCE' | 'TRANSACTION' | 'NFT_MINT';
+/**
+ * Checker types the API can return. The SDK verifies LINKED, BALANCE,
+ * TRANSACTION and NFT_MINT checkers on Stellar networks; any other checker is
+ * displayed as not supported.
+ */
+export type VenalabsCheckerType = 'LINKED' | 'BALANCE' | 'TRANSACTION' | 'NFT_MINT' | 'HYPERCORE';
 
 export interface VenalabsLinkedConfig {
   network: string;

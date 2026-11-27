@@ -24,6 +24,7 @@ import {
 } from './GlassCard';
 import { CheckerVerification } from './CheckerVerification';
 import type { VenalabsApiClient } from '../../api';
+import { getSafeLink, getVideoEmbedUrl } from '../../utils/safeUrl';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -32,7 +33,8 @@ function cn(...classes: (string | boolean | undefined | null)[]): string {
 
 export interface StepContentProps {
   step: VenalabsCourseStep;
-  onComplete: (response?: unknown) => void;
+  /** May be asynchronous: the step shows a loading state until it settles */
+  onComplete: (response?: unknown) => void | Promise<void>;
   isCompleted: boolean;
   locale?: string;
   /** API client instance for wallet/verification operations */
@@ -116,13 +118,17 @@ export function StepContent({
           locale={locale}
         />
       );
-    default:
+    case 'CERTIFICATE':
       return (
-        <div className="venalabs-text-muted">
-          {t('stepContent.unknownStepType')}
-          {step.type}
-        </div>
+        <CertificateStepContent
+          title={getLocalizedText(step.title, locale)}
+          onComplete={onComplete}
+          isCompleted={isCompleted}
+        />
       );
+    default:
+      // A step type added to the platform after this SDK version
+      return <div className="venalabs-text-muted">{t('stepContent.unsupportedStepType')}</div>;
   }
 }
 
@@ -304,16 +310,26 @@ function InlineRenderer({ item }: { item: InlineItem }): ReactNode {
   }
 
   if (item.type === 'link') {
+    const children = item.content?.map((child, i) => <InlineRenderer key={i} item={child} />);
+
+    // Only http(s), mailto: and tel: links are rendered as links (no javascript:, data:, ...)
+    const link = getSafeLink(item.href);
+    if (!link) {
+      return <span>{children}</span>;
+    }
+
+    // mailto: and tel: are handled by the system: no new tab for them
+    if (!link.external) {
+      return (
+        <a href={link.href} className="venalabs-link">
+          {children}
+        </a>
+      );
+    }
+
     return (
-      <a
-        href={item.href || '#'}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="venalabs-link"
-      >
-        {item.content?.map((child, i) => (
-          <InlineRenderer key={i} item={child} />
-        ))}
+      <a href={link.href} target="_blank" rel="noopener noreferrer" className="venalabs-link">
+        {children}
       </a>
     );
   }
@@ -331,7 +347,7 @@ function TextStepContent({
   isCompleted,
 }: {
   content: unknown[];
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
 }) {
   const { t } = useTranslation();
@@ -371,25 +387,14 @@ function VideoStepContent({
 }: {
   videoUrl: string;
   transcript?: string;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
 }) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
-  const getEmbedUrl = (url: string) => {
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-      const videoId = url.includes('youtu.be')
-        ? url.split('/').pop()
-        : new URL(url).searchParams.get('v');
-      return `https://www.youtube.com/embed/${videoId}`;
-    }
-    if (url.includes('vimeo.com')) {
-      const videoId = url.split('/').pop();
-      return `https://player.vimeo.com/video/${videoId}`;
-    }
-    return url;
-  };
+  // Only YouTube and Vimeo videos are embedded; anything else is not loaded
+  const embedUrl = getVideoEmbedUrl(videoUrl);
 
   const handleComplete = async () => {
     setLoading(true);
@@ -402,14 +407,18 @@ function VideoStepContent({
 
   return (
     <div className="venalabs-step-content">
-      <div className="venalabs-video-container">
-        <iframe
-          src={getEmbedUrl(videoUrl)}
-          className="venalabs-video-iframe"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
-      </div>
+      {embedUrl ? (
+        <div className="venalabs-video-container">
+          <iframe
+            src={embedUrl}
+            className="venalabs-video-iframe"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        <MutedText>{t('stepContent.videoUnavailable')}</MutedText>
+      )}
 
       {transcript && (
         <div className="venalabs-transcript">
@@ -445,7 +454,7 @@ function QuizStepContent({
   options: VenalabsQuizOption[];
   correctOptionIndex: number;
   explanation?: string;
-  onComplete: (response: unknown) => void;
+  onComplete: (response: unknown) => void | Promise<void>;
   isCompleted: boolean;
   locale: string;
 }) {
@@ -460,7 +469,7 @@ function QuizStepContent({
     if (selectedIndex === null) return;
     setSubmitted(true);
     if (selectedIndex === correctOptionIndex) {
-      onComplete({ selectedIndex, correct: true });
+      void onComplete({ selectedIndex, correct: true });
     }
   };
 
@@ -538,7 +547,7 @@ function ExeStepContent({
   onWalletLinked,
 }: {
   instructions: unknown[];
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
   apiClient?: VenalabsApiClient;
   courseId?: string;
@@ -573,7 +582,7 @@ function ExeStepContent({
           isCompleted={isCompleted}
           linkedWalletAddress={linkedWalletAddress}
           onWalletLinked={onWalletLinked}
-          onVerificationSuccess={onComplete}
+          onVerificationSuccess={() => void onComplete()}
         />
       </div>
     );
@@ -616,6 +625,58 @@ function ExeStepContent({
 }
 
 // ============================================
+// CERTIFICATE STEP
+// ============================================
+
+/**
+ * Minimal rendering of a CERTIFICATE step: the SDK API carries no certificate
+ * content and the SDK generates no certificate. The step can be completed so
+ * that the course can be finished.
+ */
+function CertificateStepContent({
+  title,
+  onComplete,
+  isCompleted,
+}: {
+  title: string;
+  onComplete: () => void | Promise<void>;
+  isCompleted: boolean;
+}) {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+
+  const handleComplete = async () => {
+    setLoading(true);
+    try {
+      await Promise.resolve(onComplete());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="venalabs-step-content">
+      <Title>{title}</Title>
+      <MutedText>{t('stepContent.certificateMessage')}</MutedText>
+
+      {!isCompleted && (
+        <GlassButton variant="primary" onClick={() => void handleComplete()} disabled={loading}>
+          {loading && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
+          {t('stepContent.markAsComplete')}
+        </GlassButton>
+      )}
+
+      {isCompleted && (
+        <div className="venalabs-success-message">
+          <Check className="venalabs-icon-md venalabs-text-success" />
+          <p>{t('stepContent.stepCompleted')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
 // REWARD STEP
 // ============================================
 
@@ -631,7 +692,7 @@ function RewardStepContent({
     rewardIconUrl?: string;
     amount: number;
   }>;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
   locale: string;
 }) {

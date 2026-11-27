@@ -27,6 +27,10 @@ const translations = {
     'verification.verified': 'Verified!',
     'verification.verifyComplete': 'Verify & Complete',
     'verification.label': 'Verification:',
+    'verification.unsupportedNetwork':
+      'This verification targets a network ({network}) that is not supported in this SDK version.',
+    'verification.unsupportedChecker':
+      'This verification type ({type}) is not supported in this SDK version.',
 
     // Wallet
     'wallet.failedNonce': 'Failed to get nonce',
@@ -41,9 +45,15 @@ const translations = {
     'wallet.linkWallet': 'Link Wallet',
     'wallet.currentlyLinked': 'Currently linked:',
     'wallet.switchWalletWarning': '(Connect this wallet or link the connected one)',
+    'wallet.networkMismatch':
+      'Your wallet is set to another network ({actual}). Switch it to {expected}, then try again.',
+    'wallet.networkMismatchLinkWarning':
+      'Your wallet is set to another network ({actual}). You can link it, but switch it to {expected} before signing a transaction.',
 
     // Courses
     'courses.notFound': 'Course not found',
+    'courses.startFailed': 'The course could not be started. Please try again.',
+    'courses.loadFailed': 'This course could not be loaded. Please try again.',
     'courses.noCoursesAvailable': 'No courses available',
     'courses.notPublished': "This organization hasn't published any courses yet.",
     'courses.goBack': 'Go back',
@@ -81,12 +91,37 @@ const translations = {
     'nft.minting': 'Minting...',
     'nft.minted': 'Minted!',
     'nft.mintNft': 'Mint NFT',
+    'nft.confirming': 'Confirming...',
+    'nft.transactionFailedOnChain': 'The mint transaction failed on-chain. Please try again.',
+    'nft.transactionExpired':
+      'The transaction expired before it was included in a ledger. Nothing was minted. Please try again.',
+    'nft.networkBusy':
+      'The Stellar network is busy and did not accept the transaction. Please try again in a moment.',
+    'nft.simulationFailed': 'The mint transaction could not be prepared. Please try again later.',
+    'nft.simulationFailedVerifyHint':
+      'The mint transaction could not be prepared. If you already minted this NFT, verify to complete the step. Otherwise, please try again later.',
+    'nft.recipientMismatch':
+      'This NFT is reserved for wallet {address}. Connect and link that wallet, then try again.',
+    'nft.unconfirmed':
+      'The transaction has not been confirmed yet. Do not mint again: check its status first.',
+    'nft.checkStatus': 'Check status',
+    'nft.mintedNotRecorded':
+      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: record it again, or verify to complete the step.',
+    'nft.mintedVerifyToComplete':
+      'Your NFT was minted on-chain. Do not mint again: verify to complete the step.',
+    'nft.retryRecord': 'Record mint again',
+    'nft.prerequisitesNotCompleted':
+      'Complete the previous courses of the map before minting this NFT.',
 
     // Step content
     'stepContent.unknownStepType': 'Unknown step type: ',
+    'stepContent.unsupportedStepType': 'This step type is not supported in this SDK version.',
+    'stepContent.certificateMessage':
+      'You have reached the end of this course. Complete this step to finish it.',
     'stepContent.noContent': 'No content',
     'stepContent.markAsComplete': 'Mark as complete',
     'stepContent.transcript': 'Transcript',
+    'stepContent.videoUnavailable': 'This video cannot be displayed.',
     'stepContent.submitAnswer': 'Submit Answer',
     'stepContent.tryAgain': 'Try Again',
     'stepContent.stepCompleted': 'Step completed!',
@@ -94,6 +129,8 @@ const translations = {
     'stepContent.rewardsEarned': "You've earned the following rewards:",
     'stepContent.claiming': 'Claiming...',
     'stepContent.congratulations': 'Congratulations!',
+    'stepContent.completeFailed': 'This step could not be completed. Please try again.',
+    'stepContent.verificationRequired': 'This step must be verified before it can be completed.',
 
     // Generic buttons
     'button.start': 'Start',
@@ -101,6 +138,7 @@ const translations = {
     'button.previous': 'Previous',
     'button.next': 'Next',
     'button.finish': 'Finish Course',
+    'button.retry': 'Try Again',
   },
   fr: {
     // Course card statuses
@@ -121,6 +159,10 @@ const translations = {
     'verification.verified': 'Vérifié !',
     'verification.verifyComplete': 'Vérifier et compléter',
     'verification.label': 'Vérification :',
+    'verification.unsupportedNetwork':
+      "Cette vérification cible un réseau ({network}) qui n'est pas pris en charge dans cette version du SDK.",
+    'verification.unsupportedChecker':
+      "Ce type de vérification ({type}) n'est pas pris en charge dans cette version du SDK.",
 
     // Wallet
     'wallet.failedNonce': 'Échec de récupération du nonce',
@@ -135,9 +177,15 @@ const translations = {
     'wallet.linkWallet': 'Lier le portefeuille',
     'wallet.currentlyLinked': 'Actuellement lié :',
     'wallet.switchWalletWarning': '(Connectez ce portefeuille ou liez celui connecté)',
+    'wallet.networkMismatch':
+      'Votre portefeuille est réglé sur un autre réseau ({actual}). Passez-le sur {expected}, puis réessayez.',
+    'wallet.networkMismatchLinkWarning':
+      'Votre portefeuille est réglé sur un autre réseau ({actual}). Vous pouvez le lier, mais passez-le sur {expected} avant de signer une transaction.',
 
     // Courses
     'courses.notFound': 'Cours non trouvé',
+    'courses.startFailed': "Le cours n'a pas pu être démarré. Veuillez réessayer.",
+    'courses.loadFailed': "Ce cours n'a pas pu être chargé. Veuillez réessayer.",
     'courses.noCoursesAvailable': 'Aucun cours disponible',
     'courses.notPublished': "Cette organisation n'a pas encore publié de cours.",
     'courses.goBack': 'Retour',
@@ -175,12 +223,39 @@ const translations = {
     'nft.minting': 'Mint en cours...',
     'nft.minted': 'Minté !',
     'nft.mintNft': 'Minter le NFT',
+    'nft.confirming': 'Confirmation...',
+    'nft.transactionFailedOnChain': 'La transaction de mint a échoué on-chain. Veuillez réessayer.',
+    'nft.transactionExpired':
+      "La transaction a expiré avant d'être incluse dans un ledger. Rien n'a été minté. Veuillez réessayer.",
+    'nft.networkBusy':
+      "Le réseau Stellar est saturé et n'a pas accepté la transaction. Veuillez réessayer dans un instant.",
+    'nft.simulationFailed':
+      "La transaction de mint n'a pas pu être préparée. Veuillez réessayer plus tard.",
+    'nft.simulationFailedVerifyHint':
+      "La transaction de mint n'a pas pu être préparée. Si vous avez déjà minté ce NFT, lancez la vérification pour compléter l'étape. Sinon, veuillez réessayer plus tard.",
+    'nft.recipientMismatch':
+      'Ce NFT est réservé au portefeuille {address}. Connectez et liez ce portefeuille, puis réessayez.',
+    'nft.unconfirmed':
+      "La transaction n'est pas encore confirmée. Ne mintez pas à nouveau : vérifiez d'abord son statut.",
+    'nft.checkStatus': 'Vérifier le statut',
+    'nft.mintedNotRecorded':
+      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez son enregistrement, ou lancez la vérification pour compléter l'étape.",
+    'nft.mintedVerifyToComplete':
+      "Votre NFT a été minté on-chain. Ne mintez pas à nouveau : lancez la vérification pour compléter l'étape.",
+    'nft.retryRecord': 'Enregistrer le mint à nouveau',
+    'nft.prerequisitesNotCompleted':
+      'Terminez les cours précédents de la carte avant de minter ce NFT.',
 
     // Step content
     'stepContent.unknownStepType': "Type d'étape inconnu : ",
+    'stepContent.unsupportedStepType':
+      "Ce type d'étape n'est pas pris en charge dans cette version du SDK.",
+    'stepContent.certificateMessage':
+      'Vous êtes arrivé au bout de ce cours. Complétez cette étape pour le terminer.',
     'stepContent.noContent': 'Aucun contenu',
     'stepContent.markAsComplete': 'Marquer comme terminé',
     'stepContent.transcript': 'Transcription',
+    'stepContent.videoUnavailable': 'Cette vidéo ne peut pas être affichée.',
     'stepContent.submitAnswer': 'Soumettre la réponse',
     'stepContent.tryAgain': 'Réessayer',
     'stepContent.stepCompleted': 'Étape complétée !',
@@ -188,6 +263,9 @@ const translations = {
     'stepContent.rewardsEarned': 'Vous avez gagné les récompenses suivantes :',
     'stepContent.claiming': 'Réclamation...',
     'stepContent.congratulations': 'Félicitations !',
+    'stepContent.completeFailed': "Cette étape n'a pas pu être complétée. Veuillez réessayer.",
+    'stepContent.verificationRequired':
+      'Cette étape doit être vérifiée avant de pouvoir être complétée.',
 
     // Generic buttons
     'button.start': 'Commencer',
@@ -195,6 +273,7 @@ const translations = {
     'button.previous': 'Précédent',
     'button.next': 'Suivant',
     'button.finish': 'Terminer le cours',
+    'button.retry': 'Réessayer',
   },
 } as const;
 

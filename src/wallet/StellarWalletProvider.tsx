@@ -9,19 +9,38 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   ReactNode,
   useMemo,
 } from 'react';
 import type { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit';
 import { useWalletStore } from '../store';
+import {
+  DEFAULT_STELLAR_NETWORK,
+  type StellarNetwork,
+  type WalletNetworkInfo,
+} from '../utils/stellarNetworkUtils';
 
-export type StellarNetwork = 'TESTNET' | 'PUBLIC';
+export type { StellarNetwork };
+
+/** Time allowed for the wallet to report its network before the check is skipped */
+const WALLET_NETWORK_TIMEOUT_MS = 3000;
+
+/** The user closed the wallet selection modal without choosing a wallet */
+class WalletModalClosedError extends Error {
+  constructor() {
+    super('Wallet selection cancelled');
+    this.name = 'WalletModalClosedError';
+  }
+}
 
 export interface StellarWalletContextValue {
   /** The wallet kit instance */
   kit: StellarWalletsKit | null;
   /** Whether the wallet kit is initialized */
   isInitialized: boolean;
+  /** Stellar network the SDK is configured for (the `stellarNetwork` prop) */
+  network: StellarNetwork;
   /** The currently connected wallet address */
   stellarAddress: string | null;
   /** Whether wallet is connected */
@@ -36,6 +55,11 @@ export interface StellarWalletContextValue {
   signMessage: (message: string, networkPassphrase: string) => Promise<string>;
   /** Sign a transaction XDR */
   signTransaction: (xdr: string, networkPassphrase: string) => Promise<string>;
+  /**
+   * Network currently selected in the user's wallet, or null when the wallet
+   * cannot report it
+   */
+  getWalletNetwork: () => Promise<WalletNetworkInfo | null>;
 }
 
 const StellarWalletContext = createContext<StellarWalletContextValue | null>(null);
@@ -53,7 +77,7 @@ export interface StellarWalletProviderProps {
  */
 export function StellarWalletProvider({
   children,
-  network = 'TESTNET',
+  network = DEFAULT_STELLAR_NETWORK,
   externalKit,
 }: StellarWalletProviderProps): JSX.Element {
   const [kit, setKit] = useState<StellarWalletsKit | null>(null);
@@ -107,43 +131,101 @@ export function StellarWalletProvider({
     void initKit();
   }, [setConnectionError, kit, externalKit]);
 
+  // Connection in progress, shared by concurrent callers so that a single
+  // modal is opened
+  const connectPromiseRef = useRef<Promise<string | null> | null>(null);
+  // Ends the connection in progress as if the modal had been closed
+  const cancelConnectRef = useRef<(() => void) | null>(null);
+
+  // The modal may still be open when the provider unmounts: release the
+  // pending connect() so callers are not left waiting and the shared store
+  // does not stay on "connecting" for the next mount
+  useEffect(() => {
+    return () => {
+      cancelConnectRef.current?.();
+    };
+  }, []);
+
   // Connect wallet
-  const connect = useCallback(async (): Promise<string | null> => {
+  const connect = useCallback((): Promise<string | null> => {
     if (!kit) {
       setConnectionError('Wallet kit not initialized');
-      return null;
+      return Promise.resolve(null);
+    }
+    if (connectPromiseRef.current) {
+      return connectPromiseRef.current;
     }
 
-    setIsConnecting(true);
+    // Order matters: the store's setConnectionError also clears isConnecting
     setConnectionError(null);
+    setIsConnecting(true);
 
-    try {
-      await kit.openModal({
-        // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
-        onWalletSelected: async (option: { id: string }) => {
-          kit.setWallet(option.id);
-          setWalletId(option.id);
+    // kit.openModal() resolves as soon as the modal is displayed, not when the
+    // user has chosen a wallet: wait for one of its two callbacks instead.
+    const selection = new Promise<string>((resolve, reject) => {
+      let walletSelected = false;
+      let cancelled = false;
+      cancelConnectRef.current = () => {
+        cancelled = true;
+        reject(new WalletModalClosedError());
+      };
+      Promise.resolve(
+        kit.openModal({
+          onWalletSelected: (option: { id: string }) => {
+            // The provider is gone: a late selection must not touch the wallet
+            if (cancelled) return;
+            walletSelected = true;
+            try {
+              kit.setWallet(option.id);
+              setWalletId(option.id);
+            } catch (error) {
+              reject(error);
+              return;
+            }
+            kit.getAddress().then(({ address }) => resolve(address), reject);
+          },
+          onClosed: () => {
+            // Ignored once a wallet was chosen: the address request decides
+            if (!walletSelected) {
+              reject(new WalletModalClosedError());
+            }
+          },
+        })
+      ).catch(reject);
+    });
+
+    const pending = selection
+      .then(
+        (address) => {
+          setStellarAddress(address);
+          return address;
         },
+        (error: unknown) => {
+          // The user closed the modal: not an error, nothing to display
+          if (!(error instanceof WalletModalClosedError)) {
+            console.error('[StellarWalletProvider] Connection failed:', error);
+            setConnectionError(error instanceof Error ? error.message : 'Connection failed');
+          }
+          return null;
+        }
+      )
+      .finally(() => {
+        connectPromiseRef.current = null;
+        cancelConnectRef.current = null;
+        setIsConnecting(false);
       });
 
-      const { address } = await kit.getAddress();
-      setStellarAddress(address);
-      setIsConnecting(false);
-      return address;
-    } catch (error) {
-      console.error('[StellarWalletProvider] Connection failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Connection failed';
-      setConnectionError(errorMessage);
-      setIsConnecting(false);
-      return null;
-    }
+    connectPromiseRef.current = pending;
+    return pending;
   }, [kit, setStellarAddress, setWalletId, setIsConnecting, setConnectionError]);
 
   // Disconnect wallet
   const disconnect = useCallback(() => {
     if (kit) {
       try {
-        void kit.disconnect();
+        Promise.resolve(kit.disconnect()).catch((error: unknown) => {
+          console.warn('[StellarWalletProvider] Disconnect error:', error);
+        });
       } catch (error) {
         console.warn('[StellarWalletProvider] Disconnect error:', error);
       }
@@ -183,10 +265,38 @@ export function StellarWalletProvider({
     [kit]
   );
 
+  // Ask the wallet which network it is set to
+  const getWalletNetwork = useCallback(async (): Promise<WalletNetworkInfo | null> => {
+    if (!kit) {
+      return null;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const reported = await Promise.race([
+        kit.getNetwork(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), WALLET_NETWORK_TIMEOUT_MS);
+        }),
+      ]);
+      if (!reported?.networkPassphrase) {
+        return null;
+      }
+      return { network: reported.network, networkPassphrase: reported.networkPassphrase };
+    } catch (error) {
+      // Not every wallet module can report its network
+      console.warn('[StellarWalletProvider] Could not read the wallet network:', error);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, [kit]);
+
   const contextValue = useMemo<StellarWalletContextValue>(
     () => ({
       kit,
       isInitialized,
+      network,
       stellarAddress,
       isConnected: !!stellarAddress,
       isConnecting,
@@ -194,22 +304,33 @@ export function StellarWalletProvider({
       disconnect,
       signMessage,
       signTransaction,
+      getWalletNetwork,
     }),
     [
       kit,
       isInitialized,
+      network,
       stellarAddress,
       isConnecting,
       connect,
       disconnect,
       signMessage,
       signTransaction,
+      getWalletNetwork,
     ]
   );
 
   return (
     <StellarWalletContext.Provider value={contextValue}>{children}</StellarWalletContext.Provider>
   );
+}
+
+/**
+ * Stellar network the SDK is configured for, also usable outside of a
+ * StellarWalletProvider (where it is the default network)
+ */
+export function useConfiguredStellarNetwork(): StellarNetwork {
+  return useContext(StellarWalletContext)?.network ?? DEFAULT_STELLAR_NETWORK;
 }
 
 /**

@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Check, ChevronLeft, ChevronRight, Gift } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Gift, AlertCircle } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import type { VenalabsCourse, VenalabsProgress, VenalabsChecker } from '../../types';
 import { getLocalizedText } from '../../types';
@@ -21,6 +21,9 @@ import {
 } from '../ui/GlassCard';
 import { StepContent } from '../ui/StepContent';
 import type { VenalabsApiClient } from '../../api';
+import { VenalabsApiError } from '../../api';
+import { useConfiguredStellarNetwork } from '../../wallet/StellarWalletProvider';
+import { resolveCheckerNetwork } from '../../utils/stellarNetworkUtils';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -59,7 +62,14 @@ export function StepView({
   onFinishCourse,
 }: StepViewProps) {
   const { t, locale } = useTranslation();
+  const configuredNetwork = useConfiguredStellarNetwork();
   const [currentProgress, setCurrentProgress] = useState<VenalabsProgress | null>(progress || null);
+
+  // Error of the last completion attempt, cleared when the step changes
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  useEffect(() => {
+    setCompleteError(null);
+  }, [stepId]);
 
   // Update progress when prop changes
   useEffect(() => {
@@ -103,7 +113,6 @@ export function StepView({
     if (!currentStep || currentStep.type !== 'EXE' || !currentStep.exeContent?.checkerType) {
       return null;
     }
-    console.log(currentStep);
     return {
       id: currentStep.exeContent.checkerId || '',
       organizationId: course?.organizationId || '',
@@ -124,29 +133,29 @@ export function StepView({
     const checker = getCheckerForStep();
     if (!checker || !linkedWallets) return undefined;
 
-    let network: string | undefined;
-    if (checker.linkedConfig?.network) {
-      network = checker.linkedConfig.network;
-    } else if (checker.balanceConfig?.network) {
-      network = checker.balanceConfig.network;
-    } else if (checker.transactionConfig?.network) {
-      network = checker.transactionConfig.network;
-    } else if (checker.nftMintConfig?.network) {
-      network = checker.nftMintConfig.network;
-    }
-
-    if (network) {
-      return linkedWallets[network];
-    }
-    return undefined;
+    // Same resolution as the checker components: checker network, then the prop
+    return linkedWallets[resolveCheckerNetwork(checker, configuredNetwork).network];
   };
 
   const handleComplete = async (response?: unknown) => {
     if (!stepId || !onComplete || isCompleted) return;
 
-    const result = await onComplete(stepId, response);
-    if (result) {
-      setCurrentProgress(result);
+    setCompleteError(null);
+    try {
+      const result = await onComplete(stepId, response);
+      if (result) {
+        setCurrentProgress(result);
+      }
+    } catch (error) {
+      console.error('[StepView] Failed to complete the step:', error);
+      // 409 VERIFICATION_REQUIRED: a checker step must pass its verification first
+      const verificationRequired =
+        error instanceof VenalabsApiError && error.serverCode === 'VERIFICATION_REQUIRED';
+      setCompleteError(
+        verificationRequired
+          ? t('stepContent.verificationRequired')
+          : t('stepContent.completeFailed')
+      );
     }
   };
 
@@ -245,9 +254,10 @@ export function StepView({
 
       {/* Step content */}
       <GlassCard className="venalabs-step-view__content">
+        {/* Keyed by step: each step gets a fresh instance and never inherits local state */}
         <StepContent
+          key={currentStep.id}
           step={currentStep}
-          // eslint-disable-next-line @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
           onComplete={handleComplete}
           isCompleted={isCompleted}
           locale={locale}
@@ -258,6 +268,14 @@ export function StepView({
           linkedWalletAddress={getLinkedWalletForChecker()}
           onWalletLinked={onWalletLinked}
         />
+
+        {/* Completion error */}
+        {completeError && (
+          <div className="venalabs-error-banner" role="alert">
+            <AlertCircle className="venalabs-icon-md venalabs-text-error" />
+            <p>{completeError}</p>
+          </div>
+        )}
       </GlassCard>
 
       {/* Navigation */}
