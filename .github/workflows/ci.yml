@@ -2,17 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [18.x, 20.x]
+        node-version: [20.x, 22.x]
 
     steps:
       - name: Checkout repository
@@ -35,6 +39,9 @@ jobs:
 
       - name: Type check
         run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
 
       - name: Build
         run: npm run build

@@ -75,6 +75,9 @@
   ],
   "author": "Venalabs",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/VenaLabs/Stellar-SDK/issues"
   },
