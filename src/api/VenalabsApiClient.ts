@@ -18,15 +18,12 @@ import {
   VenalabsNftVoucherResponse,
   VenalabsNftVerifyRequest,
 } from '../types';
-import { VenalabsApiError, VenalabsErrorCodes } from './errors';
+import { VenalabsApiError, VenalabsErrorCodes, type VenalabsApiErrorBody } from './errors';
 import { fetchWithRetry, FetchWithRetryOptions } from './fetchWithRetry';
 import { DEFAULT_STELLAR_NETWORK, toCheckerNetwork } from '../utils/stellarNetworkUtils';
 
 const DEFAULT_BASE_URL = 'https://api.venalabs.com';
 const DEFAULT_TIMEOUT = 30000;
-
-/** Shape of the JSON body returned by the API on error responses */
-type ApiErrorBody = Parameters<typeof VenalabsApiError.fromResponse>[1];
 
 /**
  * API client for communicating with Venalabs SDK endpoints
@@ -202,6 +199,28 @@ export class VenalabsApiClient {
   }
 
   /**
+   * Read the body of an error response. Most errors are JSON objects, some
+   * endpoints answer with a bare error code as text.
+   */
+  private async parseErrorBody(response: Response): Promise<VenalabsApiErrorBody> {
+    const text = (await response.text().catch(() => '')).trim();
+    if (text === '') {
+      return {};
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as VenalabsApiErrorBody;
+      }
+      return typeof parsed === 'string' ? { message: parsed } : {};
+    } catch {
+      // Plain text: keep short codes or messages, ignore HTML error pages
+      return text.length <= 200 && !text.includes('<') ? { message: text } : {};
+    }
+  }
+
+  /**
    * Make a request to the SDK API, with a single replay after a 401
    */
   private async request<T>(method: 'GET' | 'POST', endpoint: string, body?: unknown): Promise<T> {
@@ -227,8 +246,7 @@ export class VenalabsApiClient {
       }
 
       if (!response.ok) {
-        const errorBody = (await response.json().catch(() => ({}))) as ApiErrorBody;
-        throw VenalabsApiError.fromResponse(response.status, errorBody);
+        throw VenalabsApiError.fromResponse(response.status, await this.parseErrorBody(response));
       }
 
       return this.parseBody<T>(response);

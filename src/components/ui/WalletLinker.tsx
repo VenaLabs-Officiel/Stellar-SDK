@@ -37,7 +37,7 @@ export function WalletLinker({
   const { stellarAddress, isConnected, isConnecting, connect, signMessage, getWalletNetwork } =
     useStellarWallet();
 
-  const { setLinkedWalletForNetwork } = useWalletStore();
+  const { setLinkedWalletForNetwork, connectionError } = useWalletStore();
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +204,9 @@ export function WalletLinker({
       )}
 
       {/* Error message */}
-      {error && <div className="venalabs-wallet-linker__error">{error}</div>}
+      {(error || (!isConnected && connectionError)) && (
+        <div className="venalabs-wallet-linker__error">{error || t('wallet.connectionFailed')}</div>
+      )}
     </div>
   );
 }

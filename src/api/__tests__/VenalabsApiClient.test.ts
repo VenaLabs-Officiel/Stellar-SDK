@@ -849,3 +849,94 @@ describe('VenalabsApiClient: empty response bodies', () => {
     expect(error).not.toBeInstanceOf(SyntaxError);
   });
 });
+
+describe('VenalabsApiError: backend error codes', () => {
+  it('reads the code of the structured error body ({ code, message })', () => {
+    const error = VenalabsApiError.fromResponse(409, {
+      code: 'VERIFICATION_REQUIRED',
+      message: 'This step must be verified before it can be completed',
+    });
+
+    expect(error.status).toBe(409);
+    expect(error.serverCode).toBe('VERIFICATION_REQUIRED');
+    expect(error.message).toBe('This step must be verified before it can be completed');
+  });
+
+  it('reads a code carried by the message of a Spring error body', () => {
+    const error = VenalabsApiError.fromResponse(400, {
+      status: 400,
+      error: 'Bad Request',
+      message: 'NO_LINKED_WALLETS',
+    });
+
+    expect(error.serverCode).toBe('NO_LINKED_WALLETS');
+  });
+
+  it('reads a code carried by the detail of a problem+json body', () => {
+    const error = VenalabsApiError.fromResponse(400, {
+      title: 'Bad Request',
+      status: 400,
+      detail: 'PREREQUISITES_NOT_COMPLETED',
+    });
+
+    expect(error.serverCode).toBe('PREREQUISITES_NOT_COMPLETED');
+  });
+
+  it('has no server code when the body carries none', () => {
+    expect(
+      VenalabsApiError.fromResponse(400, { status: 400, error: 'Bad Request' }).serverCode
+    ).toBeUndefined();
+    expect(
+      VenalabsApiError.fromResponse(404, { message: 'Course not found' }).serverCode
+    ).toBeUndefined();
+    expect(VenalabsApiError.fromResponse(500).serverCode).toBeUndefined();
+    // A numeric code is the HTTP status, not a backend error code
+    expect(
+      VenalabsApiError.fromResponse(403, { code: 403, type: 'INVALID_API_KEY' }).serverCode
+    ).toBe('INVALID_API_KEY');
+  });
+
+  it('exposes the code of a 409 VERIFICATION_REQUIRED answer to complete', async () => {
+    server.use(
+      http.post(`${BASE_URL}/api/v1/sdk/courses/course-1/steps/step-1/complete`, () =>
+        HttpResponse.json(
+          {
+            code: 'VERIFICATION_REQUIRED',
+            message: 'This step must be verified before it can be completed',
+            details: { stepId: 'step-1', checkerId: 'checker-1' },
+          },
+          { status: 409 }
+        )
+      )
+    );
+    const client = new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: createTokenProvider('test-token'),
+      baseUrl: BASE_URL,
+    });
+
+    const error = await client.completeStep('course-1', 'step-1').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).status).toBe(409);
+    expect((error as VenalabsApiError).serverCode).toBe('VERIFICATION_REQUIRED');
+  });
+
+  it('reads a code sent as a plain text body', async () => {
+    server.use(
+      http.post(
+        `${BASE_URL}/api/v1/sdk/courses/course-1/steps/step-1/complete`,
+        () => new HttpResponse('CONCURRENT_UPDATE', { status: 409 })
+      )
+    );
+    const client = new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: createTokenProvider('test-token'),
+      baseUrl: BASE_URL,
+    });
+
+    const error = await client.completeStep('course-1', 'step-1').catch((e: unknown) => e);
+
+    expect((error as VenalabsApiError).serverCode).toBe('CONCURRENT_UPDATE');
+  });
+});

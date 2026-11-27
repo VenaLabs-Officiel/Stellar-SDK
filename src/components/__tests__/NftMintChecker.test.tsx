@@ -705,3 +705,42 @@ describe('NftMintChecker: network', () => {
     expect(api.voucherCalls).toBe(0);
   });
 });
+
+describe('NftMintChecker: voucher errors', () => {
+  const voucherError = (status: number, body: Record<string, unknown>) =>
+    server.use(
+      http.get(`${SDK}/courses/:courseId/steps/:stepId/nft-voucher`, () =>
+        HttpResponse.json(body, { status })
+      )
+    );
+
+  it('invites the user to link a wallet on 400 NO_LINKED_WALLETS', async () => {
+    voucherError(400, { status: 400, error: 'Bad Request', message: 'NO_LINKED_WALLETS' });
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('Please link your wallet first')).toBeInTheDocument();
+    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('explains 400 PREREQUISITES_NOT_COMPLETED as soon as the step is displayed', async () => {
+    voucherError(400, {
+      status: 400,
+      error: 'Bad Request',
+      message: 'PREREQUISITES_NOT_COMPLETED',
+    });
+    renderChecker();
+
+    expect(
+      await screen.findByText('Complete the previous courses of the map before minting this NFT.')
+    ).toBeInTheDocument();
+  });
+
+  it('shows the generic voucher message for any other error', async () => {
+    voucherError(404, { message: 'Checker not found' });
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('Failed to get voucher. Please try again.')).toBeInTheDocument();
+  });
+});

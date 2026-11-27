@@ -28,6 +28,34 @@ export const VenalabsErrorCodes = {
 
 export type VenalabsErrorCode = (typeof VenalabsErrorCodes)[keyof typeof VenalabsErrorCodes];
 
+/** Shape of the error bodies the API may return (JSON error, Spring error, problem+json) */
+export interface VenalabsApiErrorBody {
+  /** HTTP status (number) or backend error code (string, e.g. "VERIFICATION_REQUIRED") */
+  code?: number | string;
+  type?: string;
+  message?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
+/** Backend error codes are upper snake case, e.g. NO_LINKED_WALLETS */
+const SERVER_CODE_PATTERN = /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/;
+
+/**
+ * Find the backend error code in an error body. Depending on the endpoint it
+ * is carried by `code`, `type`, `message` or `detail`.
+ */
+function extractServerCode(body?: VenalabsApiErrorBody): string | undefined {
+  if (!body) return undefined;
+  const candidates = [body.code, body.type, body.message, body.detail];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && SERVER_CODE_PATTERN.test(candidate.trim())) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
 /**
  * Custom error class for Venalabs API errors
  */
@@ -37,11 +65,14 @@ export class VenalabsApiError extends Error {
    * @param code - Error code from VenalabsErrorCodes
    * @param status - HTTP status code (0 for network errors)
    * @param message - Human-readable error message
+   * @param serverCode - Error code sent by the backend, when there is one
+   *   (e.g. "NO_LINKED_WALLETS", "VERIFICATION_REQUIRED")
    */
   constructor(
     public readonly code: VenalabsErrorCode,
     public readonly status: number,
-    message: string
+    message: string,
+    public readonly serverCode?: string
   ) {
     super(message);
     this.name = 'VenalabsApiError';
@@ -81,10 +112,7 @@ export class VenalabsApiError extends Error {
   /**
    * Create error from HTTP response
    */
-  static fromResponse(
-    status: number,
-    body?: { code?: number; type?: string; message?: string }
-  ): VenalabsApiError {
+  static fromResponse(status: number, body?: VenalabsApiErrorBody): VenalabsApiError {
     // Map status codes to error codes
     let code: VenalabsErrorCode;
     let message: string;
@@ -119,7 +147,7 @@ export class VenalabsApiError extends Error {
         }
     }
 
-    return new VenalabsApiError(code, status, message);
+    return new VenalabsApiError(code, status, message, extractServerCode(body));
   }
 
   /**

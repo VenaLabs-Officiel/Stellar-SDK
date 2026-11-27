@@ -72,6 +72,11 @@ export interface NftMintCheckerProps {
   sorobanRpcUrl?: string;
 }
 
+/** Whether an error is an API error carrying the given backend error code */
+function isServerError(error: unknown, serverCode: string): boolean {
+  return error instanceof VenalabsApiError && error.serverCode === serverCode;
+}
+
 // Format address for display
 function formatAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -127,6 +132,8 @@ export function NftMintChecker({
   // Voucher state
   const [voucherLoading, setVoucherLoading] = useState(true);
   const [voucherData, setVoucherData] = useState<VenalabsNftVoucherResponse | null>(null);
+  // The backend refuses the voucher until the previous courses of the map are completed
+  const [prerequisitesMissing, setPrerequisitesMissing] = useState(false);
 
   // Guards against state updates after unmount or for a step that is no longer shown
   const stepKey = `${courseId}:${stepId}`;
@@ -162,6 +169,7 @@ export function NftMintChecker({
   // A different step starts from a clean state
   useEffect(() => {
     setVoucherData(null);
+    setPrerequisitesMissing(false);
     setMintLoading(false);
     setMintPhase('idle');
     setMintSuccess(false);
@@ -198,7 +206,10 @@ export function NftMintChecker({
       })
       .catch((error) => {
         if (cancelled) return;
+        // No linked wallet yet is the normal state before linking: stay silent
+        if (isServerError(error, 'NO_LINKED_WALLETS')) return;
         console.error('[NftMintChecker] Failed to load voucher:', error);
+        setPrerequisitesMissing(isServerError(error, 'PREREQUISITES_NOT_COMPLETED'));
       })
       .finally(() => {
         if (!cancelled) setVoucherLoading(false);
@@ -287,6 +298,7 @@ export function NftMintChecker({
     setMintLoading(true);
     setMintPhase('preparing');
     setMintError(null);
+    setPrerequisitesMissing(false);
 
     try {
       // 1. Get voucher
@@ -295,16 +307,15 @@ export function NftMintChecker({
         voucher = await apiClient.getNftVoucher(courseId, stepId);
       } catch (voucherError) {
         console.error('[NftMintChecker] Voucher error:', voucherError);
-        if (voucherError instanceof VenalabsApiError) {
-          // Handle specific error types
-          if (voucherError.code === 'NOT_FOUND') {
-            update(() => setMintError(t('nft.linkWalletFirst')));
+        update(() => {
+          if (isServerError(voucherError, 'NO_LINKED_WALLETS')) {
+            setMintError(t('nft.linkWalletFirst'));
+          } else if (isServerError(voucherError, 'PREREQUISITES_NOT_COMPLETED')) {
+            setPrerequisitesMissing(true);
           } else {
-            update(() => setMintError(t('nft.failedVoucher')));
+            setMintError(t('nft.failedVoucher'));
           }
-        } else {
-          update(() => setMintError(t('nft.failedVoucher')));
-        }
+        });
         return;
       }
       if (!isActive()) return;
@@ -722,6 +733,14 @@ export function NftMintChecker({
             <div className="venalabs-error-banner">
               <AlertCircle className="venalabs-icon-md venalabs-text-error" />
               <p>{mintError}</p>
+            </div>
+          )}
+
+          {/* Voucher refused: previous courses of the map are not completed */}
+          {prerequisitesMissing && !mintError && (
+            <div className="venalabs-warning-banner">
+              <AlertCircle className="venalabs-icon-md venalabs-text-warning" />
+              <p>{t('nft.prerequisitesNotCompleted')}</p>
             </div>
           )}
 

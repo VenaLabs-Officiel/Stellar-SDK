@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Check, ChevronLeft, ChevronRight, Gift } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Gift, AlertCircle } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import type { VenalabsCourse, VenalabsProgress, VenalabsChecker } from '../../types';
 import { getLocalizedText } from '../../types';
@@ -21,6 +21,7 @@ import {
 } from '../ui/GlassCard';
 import { StepContent } from '../ui/StepContent';
 import type { VenalabsApiClient } from '../../api';
+import { VenalabsApiError } from '../../api';
 import { useConfiguredStellarNetwork } from '../../wallet/StellarWalletProvider';
 import { resolveCheckerNetwork } from '../../utils/stellarNetworkUtils';
 
@@ -63,6 +64,12 @@ export function StepView({
   const { t, locale } = useTranslation();
   const configuredNetwork = useConfiguredStellarNetwork();
   const [currentProgress, setCurrentProgress] = useState<VenalabsProgress | null>(progress || null);
+
+  // Error of the last completion attempt, cleared when the step changes
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  useEffect(() => {
+    setCompleteError(null);
+  }, [stepId]);
 
   // Update progress when prop changes
   useEffect(() => {
@@ -133,9 +140,22 @@ export function StepView({
   const handleComplete = async (response?: unknown) => {
     if (!stepId || !onComplete || isCompleted) return;
 
-    const result = await onComplete(stepId, response);
-    if (result) {
-      setCurrentProgress(result);
+    setCompleteError(null);
+    try {
+      const result = await onComplete(stepId, response);
+      if (result) {
+        setCurrentProgress(result);
+      }
+    } catch (error) {
+      console.error('[StepView] Failed to complete the step:', error);
+      // 409 VERIFICATION_REQUIRED: a checker step must pass its verification first
+      const verificationRequired =
+        error instanceof VenalabsApiError && error.serverCode === 'VERIFICATION_REQUIRED';
+      setCompleteError(
+        verificationRequired
+          ? t('stepContent.verificationRequired')
+          : t('stepContent.completeFailed')
+      );
     }
   };
 
@@ -248,6 +268,14 @@ export function StepView({
           linkedWalletAddress={getLinkedWalletForChecker()}
           onWalletLinked={onWalletLinked}
         />
+
+        {/* Completion error */}
+        {completeError && (
+          <div className="venalabs-error-banner" role="alert">
+            <AlertCircle className="venalabs-icon-md venalabs-text-error" />
+            <p>{completeError}</p>
+          </div>
+        )}
       </GlassCard>
 
       {/* Navigation */}

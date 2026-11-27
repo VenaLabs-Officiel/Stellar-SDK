@@ -15,7 +15,7 @@ import {
 } from 'react';
 import { VenalabsApiClient } from '../api';
 import { VenalabsApiError } from '../api/errors';
-import { I18nContext, createTranslator, SupportedLocale } from '../i18n';
+import { I18nContext, createTranslator, useTranslation, SupportedLocale } from '../i18n';
 import { StellarWalletProvider, type StellarNetwork, type StellarWalletsKit } from '../wallet';
 import type {
   VenalabsMap,
@@ -109,6 +109,8 @@ interface SDKContextValue {
   linkedWallets: Record<string, string>;
   refreshMaps: () => Promise<void>;
   refreshProgress: () => Promise<void>;
+  /** Reload maps, progress and linked wallets, showing the loading state */
+  reload: () => Promise<void>;
   getCourse: (courseId: string) => Promise<VenalabsCourse | null>;
   startCourse: (courseId: string) => Promise<void>;
   completeStep: (
@@ -334,36 +336,45 @@ function VenalabsStellarSDKProvider({
           stepId,
           response as SdkStepCompletionRequest | undefined
         );
-        // Refresh progress after completing
-        await refreshProgress();
-        // Return updated progress for the course
-        const updatedProgress = await apiClient.getCourseProgress(courseId);
-        return updatedProgress || undefined;
       } catch (err) {
         console.error('Failed to complete step:', err);
         throw err;
+      }
+
+      // The step is completed: a failure to read the progress back must not
+      // be reported as a failed completion
+      await refreshProgress();
+      try {
+        const updatedProgress = await apiClient.getCourseProgress(courseId);
+        return updatedProgress || undefined;
+      } catch (err) {
+        console.warn('Failed to fetch the updated course progress:', err);
+        return undefined;
       }
     },
     [apiClient, refreshProgress]
   );
 
+  // Load everything, with the loading state shown meanwhile. Used for the
+  // initial fetch and for the "Try Again" button of the error view.
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await Promise.all([refreshMaps(), refreshProgress()]);
+      // Fetch linked wallet after auth is verified (maps/progress succeeded)
+      void fetchLinkedWallet();
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load'));
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshMaps, refreshProgress, fetchLinkedWallet]);
+
   // Initial fetch
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        await Promise.all([refreshMaps(), refreshProgress()]);
-        // Fetch linked wallet after auth is verified (maps/progress succeeded)
-        void fetchLinkedWallet();
-      } catch (err) {
-        // Error is already set in refreshMaps
-      } finally {
-        setLoading(false);
-      }
-    };
-    void init();
-  }, [refreshMaps, refreshProgress, fetchLinkedWallet]);
+    void reload();
+  }, [reload]);
 
   // SDK context value
   const sdkValue = useMemo(
@@ -376,6 +387,7 @@ function VenalabsStellarSDKProvider({
       linkedWallets,
       refreshMaps,
       refreshProgress,
+      reload,
       getCourse,
       startCourse,
       completeStep,
@@ -390,6 +402,7 @@ function VenalabsStellarSDKProvider({
       linkedWallets,
       refreshMaps,
       refreshProgress,
+      reload,
       getCourse,
       startCourse,
       completeStep,
@@ -414,7 +427,7 @@ function SDKRouter() {
     progress,
     loading,
     error,
-    refreshMaps,
+    reload,
     getCourse,
     startCourse,
     completeStep,
@@ -423,10 +436,14 @@ function SDKRouter() {
     onWalletLinked,
   } = useSDKContext();
   const { view, navigateToMap, navigateToCourse, navigateToStep } = useSDKNavigation();
+  const { t } = useTranslation();
 
   // Course state for course and step views
   const [currentCourse, setCurrentCourse] = useState<VenalabsCourse | null>(null);
   const [courseLoading, setCourseLoading] = useState(false);
+  const [courseError, setCourseError] = useState(false);
+  // Incremented to load the course again after a failure
+  const [courseReloadKey, setCourseReloadKey] = useState(0);
 
   // Get progress for current course
   const currentCourseProgress = useMemo(() => {
@@ -438,17 +455,36 @@ function SDKRouter() {
   useEffect(() => {
     if (view.type === 'map') {
       setCurrentCourse(null);
+      setCourseError(false);
       return;
     }
 
+    // Ignore the answer once the user has navigated elsewhere
+    let cancelled = false;
     const loadCourse = async () => {
       setCourseLoading(true);
-      const course = await getCourse(view.courseId);
-      setCurrentCourse(course);
-      setCourseLoading(false);
+      setCourseError(false);
+      try {
+        // getCourse resolves null when the course could not be fetched
+        const course = await getCourse(view.courseId);
+        if (cancelled) return;
+        setCurrentCourse(course);
+        setCourseError(course === null);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Failed to load course:', err);
+        setCurrentCourse(null);
+        setCourseError(true);
+      } finally {
+        if (!cancelled) setCourseLoading(false);
+      }
     };
     void loadCourse();
-  }, [view, getCourse]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [view, getCourse, courseReloadKey]);
 
   // Handle node click from map
   const handleNodeClick = useCallback(
@@ -542,7 +578,28 @@ function SDKRouter() {
 
   // Error state
   if (error) {
-    return <SDKErrorView error={error} onRetry={() => void refreshMaps()} />;
+    return <SDKErrorView error={error} onRetry={() => void reload()} />;
+  }
+
+  // The course of the current view could not be loaded
+  if (view.type !== 'map' && courseError && !courseLoading) {
+    return (
+      <div className="venalabs-sdk-error">
+        <EmptyState emoji="⚠️" title={t('courses.loadFailed')}>
+          <div className="venalabs-sdk-error__actions">
+            <button
+              onClick={() => setCourseReloadKey((key) => key + 1)}
+              className="venalabs-btn-base venalabs-btn--primary"
+            >
+              {t('button.retry')}
+            </button>
+            <button onClick={navigateToMap} className="venalabs-btn-base venalabs-btn--secondary">
+              {t('courses.backToMap')}
+            </button>
+          </div>
+        </EmptyState>
+      </div>
+    );
   }
 
   // Map view

@@ -48,6 +48,8 @@ const translations = {
 
     // Courses
     'courses.notFound': 'Course not found',
+    'courses.startFailed': 'The course could not be started. Please try again.',
+    'courses.loadFailed': 'This course could not be loaded. Please try again.',
     'courses.noCoursesAvailable': 'No courses available',
     'courses.notPublished': "This organization hasn't published any courses yet.",
     'courses.goBack': 'Go back',
@@ -102,6 +104,8 @@ const translations = {
     'nft.mintedNotRecorded':
       'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: retry the verification.',
     'nft.retryRecord': 'Retry verification',
+    'nft.prerequisitesNotCompleted':
+      'Complete the previous courses of the map before minting this NFT.',
 
     // Step content
     'stepContent.unknownStepType': 'Unknown step type: ',
@@ -115,6 +119,8 @@ const translations = {
     'stepContent.rewardsEarned': "You've earned the following rewards:",
     'stepContent.claiming': 'Claiming...',
     'stepContent.congratulations': 'Congratulations!',
+    'stepContent.completeFailed': 'This step could not be completed. Please try again.',
+    'stepContent.verificationRequired': 'This step must be verified before it can be completed.',
 
     // Generic buttons
     'button.start': 'Start',
@@ -122,6 +128,7 @@ const translations = {
     'button.previous': 'Previous',
     'button.next': 'Next',
     'button.finish': 'Finish Course',
+    'button.retry': 'Try Again',
   },
   fr: {
     // Course card statuses
@@ -163,6 +170,8 @@ const translations = {
 
     // Courses
     'courses.notFound': 'Cours non trouvé',
+    'courses.startFailed': "Le cours n'a pas pu être démarré. Veuillez réessayer.",
+    'courses.loadFailed': "Ce cours n'a pas pu être chargé. Veuillez réessayer.",
     'courses.noCoursesAvailable': 'Aucun cours disponible',
     'courses.notPublished': "Cette organisation n'a pas encore publié de cours.",
     'courses.goBack': 'Retour',
@@ -218,6 +227,8 @@ const translations = {
     'nft.mintedNotRecorded':
       "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez la vérification.",
     'nft.retryRecord': 'Relancer la vérification',
+    'nft.prerequisitesNotCompleted':
+      'Terminez les cours précédents de la carte avant de minter ce NFT.',
 
     // Step content
     'stepContent.unknownStepType': "Type d'étape inconnu : ",
@@ -231,6 +242,9 @@ const translations = {
     'stepContent.rewardsEarned': 'Vous avez gagné les récompenses suivantes :',
     'stepContent.claiming': 'Réclamation...',
     'stepContent.congratulations': 'Félicitations !',
+    'stepContent.completeFailed': "Cette étape n'a pas pu être complétée. Veuillez réessayer.",
+    'stepContent.verificationRequired':
+      'Cette étape doit être vérifiée avant de pouvoir être complétée.',
 
     // Generic buttons
     'button.start': 'Commencer',
@@ -238,6 +252,7 @@ const translations = {
     'button.previous': 'Précédent',
     'button.next': 'Suivant',
     'button.finish': 'Terminer le cours',
+    'button.retry': 'Réessayer',
   },
 } as const;
 

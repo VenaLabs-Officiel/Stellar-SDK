@@ -5,7 +5,7 @@
  */
 
 import { useState } from 'react';
-import { Check, Play, Lock, Gift, Loader2 } from 'lucide-react';
+import { Check, Play, Lock, Gift, Loader2, AlertCircle } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import type { VenalabsCourse, VenalabsProgress, VenalabsCourseStep } from '../../types';
 import { getLocalizedText } from '../../types';
@@ -51,12 +51,17 @@ export function CourseDetailView({
 }: CourseDetailViewProps) {
   const { t, locale } = useTranslation();
   const [startingCourse, setStartingCourse] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const handleStartCourse = async () => {
-    if (!onStartCourse) return;
+    if (!onStartCourse || startingCourse) return;
     setStartingCourse(true);
+    setStartError(null);
     try {
       await onStartCourse();
+    } catch (error) {
+      console.error('[CourseDetailView] Failed to start the course:', error);
+      setStartError(t('courses.startFailed'));
     } finally {
       setStartingCourse(false);
     }
@@ -149,6 +154,14 @@ export function CourseDetailView({
               </div>
             )}
           </div>
+
+          {/* Start error */}
+          {startError && (
+            <div className="venalabs-error-banner" role="alert">
+              <AlertCircle className="venalabs-icon-md venalabs-text-error" />
+              <p>{startError}</p>
+            </div>
+          )}
 
           {/* Progress bar */}
           <div className="venalabs-course-progress">
