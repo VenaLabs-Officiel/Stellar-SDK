@@ -1,6 +1,6 @@
 /**
  * Type definitions for venalabs-stellar-sdk
- * Adapted from airdroped-app SaasTypes
+ * Adapted from the VenaLabs web app SaaS types
  */
 
 // Localized field types
