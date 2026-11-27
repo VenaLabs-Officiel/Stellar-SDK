@@ -568,3 +568,284 @@ describe('fetchWithRetry', () => {
     });
   }, 10000);
 });
+
+describe('VenalabsApiClient: retries only apply to GET requests', () => {
+  const makeClient = () =>
+    new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: createTokenProvider('test-token'),
+      baseUrl: BASE_URL,
+    });
+
+  it('retries a GET once after a 5xx response', async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ message: 'Server error' }, { status: 503 })
+          : HttpResponse.json(mockMaps);
+      })
+    );
+
+    await expect(makeClient().getMaps()).resolves.toEqual(mockMaps);
+    expect(calls).toBe(2);
+  });
+
+  it('retries a GET once after a network error', async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/progress`, () => {
+        calls++;
+        return calls === 1 ? HttpResponse.error() : HttpResponse.json(mockProgress);
+      })
+    );
+
+    await expect(makeClient().getProgress()).resolves.toEqual(mockProgress);
+    expect(calls).toBe(2);
+  });
+
+  const postCases: Array<[string, string, (client: VenalabsApiClient) => Promise<unknown>]> = [
+    ['start', '/courses/course-1/start', (c) => c.startCourse('course-1')],
+    [
+      'complete',
+      '/courses/course-1/steps/step-1/complete',
+      (c) => c.completeStep('course-1', 'step-1'),
+    ],
+    ['wallet link', '/wallet/stellar/link', (c) => c.linkStellarWallet('GADDRESS', 'signature')],
+    ['verify', '/courses/course-1/steps/step-1/verify', (c) => c.verifyStep('course-1', 'step-1')],
+    [
+      'nft-verify',
+      '/courses/course-1/steps/step-1/nft-verify',
+      (c) => c.verifyNftMint('course-1', 'step-1', 'txhash'),
+    ],
+  ];
+
+  it.each(postCases)('does not replay POST %s after a 5xx response', async (_name, path, call) => {
+    let calls = 0;
+    server.use(
+      http.post(`${BASE_URL}/api/v1/sdk${path}`, () => {
+        calls++;
+        return HttpResponse.json({ message: 'Server error' }, { status: 500 });
+      })
+    );
+
+    const error = await call(makeClient()).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).code).toBe(VenalabsErrorCodes.SERVER_ERROR);
+    expect(calls).toBe(1);
+  });
+
+  it('does not replay a POST after a network error', async () => {
+    let calls = 0;
+    server.use(
+      http.post(`${BASE_URL}/api/v1/sdk/courses/course-1/steps/step-1/complete`, () => {
+        calls++;
+        return HttpResponse.error();
+      })
+    );
+
+    const error = await makeClient()
+      .completeStep('course-1', 'step-1')
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).code).toBe(VenalabsErrorCodes.NETWORK_ERROR);
+    expect(calls).toBe(1);
+  });
+
+  it('still replays a POST once after a 401, with a fresh token', async () => {
+    const tokens = ['expired-token', 'fresh-token'];
+    let providerCalls = 0;
+    const seen: Array<string | null> = [];
+    server.use(
+      http.post(`${BASE_URL}/api/v1/sdk/courses/course-1/start`, ({ request }) => {
+        const auth = request.headers.get('Authorization');
+        seen.push(auth);
+        return auth === 'Bearer fresh-token'
+          ? new HttpResponse(null, { status: 204 })
+          : HttpResponse.json({ type: 'TOKEN_EXPIRED' }, { status: 401 });
+      })
+    );
+
+    const client = new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: () => Promise.resolve(tokens[providerCalls++] ?? 'fresh-token'),
+      baseUrl: BASE_URL,
+    });
+
+    await expect(client.startCourse('course-1')).resolves.toBeUndefined();
+    expect(seen).toEqual(['Bearer expired-token', 'Bearer fresh-token']);
+  });
+});
+
+describe('VenalabsApiClient: access token validation', () => {
+  const clientWith = (getAccessToken: TokenProvider) =>
+    new VenalabsApiClient({ apiKey: 'test-api-key', getAccessToken, baseUrl: BASE_URL });
+
+  it.each([
+    ['an empty string', ''],
+    ['a blank string', '   '],
+    ['undefined', undefined],
+    ['null', null],
+  ])('throws a VenalabsApiError when getAccessToken returns %s', async (_label, value) => {
+    let requests = 0;
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, () => {
+        requests++;
+        return HttpResponse.json(mockMaps);
+      })
+    );
+
+    const error = await clientWith(() => Promise.resolve(value as unknown as string))
+      .getMaps()
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).code).toBe(VenalabsErrorCodes.INVALID_TOKEN);
+    expect((error as VenalabsApiError).message).toMatch(/getAccessToken returned an empty token/);
+    // Nothing is sent with "Bearer undefined"
+    expect(requests).toBe(0);
+  });
+
+  it('wraps a rejection of getAccessToken in a VenalabsApiError', async () => {
+    const error = await clientWith(() => Promise.reject(new Error('session expired')))
+      .getMaps()
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).code).toBe(VenalabsErrorCodes.INVALID_TOKEN);
+    expect((error as VenalabsApiError).message).toMatch(/session expired/);
+  });
+
+  it('wraps a synchronous throw of getAccessToken in a VenalabsApiError', async () => {
+    const provider = (() => {
+      throw new Error('not signed in');
+    }) as unknown as TokenProvider;
+
+    const error = await clientWith(provider)
+      .getMaps()
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect((error as VenalabsApiError).message).toMatch(/not signed in/);
+  });
+
+  it('asks for a token again on the next request after a failure', async () => {
+    let calls = 0;
+    const client = clientWith(() => {
+      calls++;
+      return calls === 1 ? Promise.reject(new Error('offline')) : Promise.resolve('test-token');
+    });
+
+    await expect(client.getMaps()).rejects.toBeInstanceOf(VenalabsApiError);
+    await expect(client.getMaps()).resolves.toEqual(mockMaps);
+    expect(calls).toBe(2);
+  });
+});
+
+describe('VenalabsApiClient: concurrent token refresh', () => {
+  it('refreshes the token once when several requests receive a 401', async () => {
+    let providerCalls = 0;
+    const provider: TokenProvider = () => {
+      providerCalls++;
+      return Promise.resolve(providerCalls === 1 ? 'stale-token' : `fresh-token-${providerCalls}`);
+    };
+
+    // Each endpoint rejects the stale token after a different delay, so the
+    // 401 responses arrive one after the other
+    const guarded =
+      (delayMs: number, body: unknown) =>
+      async ({ request }: { request: Request }) => {
+        if (request.headers.get('Authorization') === 'Bearer stale-token') {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          return HttpResponse.json({ type: 'TOKEN_EXPIRED' }, { status: 401 });
+        }
+        return HttpResponse.json(body as Record<string, unknown>);
+      };
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, guarded(10, mockMaps)),
+      http.get(`${BASE_URL}/api/v1/sdk/progress`, guarded(60, mockProgress)),
+      http.get(`${BASE_URL}/api/v1/sdk/wallet`, guarded(120, { walletAddresses: {} }))
+    );
+
+    const client = new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: provider,
+      baseUrl: BASE_URL,
+    });
+
+    const [maps, progress, wallets] = await Promise.all([
+      client.getMaps(),
+      client.getProgress(),
+      client.getLinkedWallets(),
+    ]);
+
+    expect(maps).toEqual(mockMaps);
+    expect(progress).toEqual(mockProgress);
+    expect(wallets).toEqual({ walletAddresses: {} });
+    // One initial fetch + a single shared refresh
+    expect(providerCalls).toBe(2);
+  });
+});
+
+describe('VenalabsApiClient: empty response bodies', () => {
+  const makeClient = () =>
+    new VenalabsApiClient({
+      apiKey: 'test-api-key',
+      getAccessToken: createTokenProvider('test-token'),
+      baseUrl: BASE_URL,
+    });
+
+  it('does not throw a SyntaxError on a POST answered with 200 and no body', async () => {
+    server.use(
+      http.post(
+        `${BASE_URL}/api/v1/sdk/courses/course-1/steps/step-1/nft-verify`,
+        () => new HttpResponse(null, { status: 200 })
+      )
+    );
+
+    await expect(
+      makeClient().verifyNftMint('course-1', 'step-1', 'txhash')
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not throw a SyntaxError on a GET answered with 200 and no body', async () => {
+    server.use(
+      http.get(
+        `${BASE_URL}/api/v1/sdk/progress/course-1`,
+        () => new HttpResponse(null, { status: 200 })
+      )
+    );
+
+    await expect(makeClient().getCourseProgress('course-1')).resolves.toBeNull();
+  });
+
+  it('does not throw a SyntaxError on a GET answered with 204', async () => {
+    server.use(
+      http.get(
+        `${BASE_URL}/api/v1/sdk/progress/course-1`,
+        () => new HttpResponse(null, { status: 204 })
+      )
+    );
+
+    await expect(makeClient().getCourseProgress('course-1')).resolves.toBeNull();
+  });
+
+  it('reports a body that is not JSON as a VenalabsApiError, not a SyntaxError', async () => {
+    server.use(
+      http.get(
+        `${BASE_URL}/api/v1/sdk/maps`,
+        () => new HttpResponse('<html>gateway</html>', { status: 200 })
+      )
+    );
+
+    const error = await makeClient()
+      .getMaps()
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VenalabsApiError);
+    expect(error).not.toBeInstanceOf(SyntaxError);
+  });
+});

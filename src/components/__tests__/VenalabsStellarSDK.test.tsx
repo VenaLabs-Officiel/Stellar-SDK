@@ -464,6 +464,86 @@ describe('VenalabsStellarSDK', () => {
   });
 });
 
+describe('VenalabsStellarSDK: API client stability', () => {
+  it('does not refetch when the host passes a new getAccessToken function on each render', async () => {
+    let mapsRequests = 0;
+    let tokenCalls = 0;
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, () => {
+        mapsRequests++;
+        return HttpResponse.json(mockMaps);
+      })
+    );
+
+    // Inline arrow function: a new identity on every render of the host
+    const renderSdk = () => (
+      <VenalabsStellarSDK
+        apiKey="test-key"
+        getAccessToken={() => {
+          tokenCalls++;
+          return Promise.resolve('test-token');
+        }}
+        baseUrl={BASE_URL}
+      />
+    );
+
+    const { rerender } = render(renderSdk());
+    await waitFor(() => {
+      expect(screen.getByText('Test Learning Map')).toBeInTheDocument();
+    });
+
+    rerender(renderSdk());
+    rerender(renderSdk());
+    rerender(renderSdk());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Still the same client: one data load and one cached token
+    expect(mapsRequests).toBe(1);
+    expect(tokenCalls).toBe(1);
+    expect(screen.getByText('Test Learning Map')).toBeInTheDocument();
+  });
+
+  it('uses the latest getAccessToken function when the token must be refreshed', async () => {
+    const seen: Array<string | null> = [];
+    let rejectNext = false;
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/courses/:courseId`, ({ request }) => {
+        const auth = request.headers.get('Authorization');
+        seen.push(auth);
+        if (rejectNext) {
+          rejectNext = false;
+          return HttpResponse.json({ type: 'TOKEN_EXPIRED' }, { status: 401 });
+        }
+        return HttpResponse.json(mockCourse);
+      })
+    );
+
+    const renderSdk = (token: string) => (
+      <VenalabsStellarSDK
+        apiKey="test-key"
+        getAccessToken={() => Promise.resolve(token)}
+        baseUrl={BASE_URL}
+      />
+    );
+
+    const { rerender } = render(renderSdk('token-1'));
+    await waitFor(() => {
+      expect(screen.getByText('Introduction to Web3')).toBeInTheDocument();
+    });
+
+    // The host now provides another token source; the next 401 must use it
+    rerender(renderSdk('token-2'));
+    rejectNext = true;
+    const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
+    fireEvent.click(courseCard!);
+
+    await waitFor(() => {
+      expect(document.querySelector('.venalabs-course-detail')).toBeInTheDocument();
+    });
+    expect(seen).toEqual(['Bearer token-1', 'Bearer token-2']);
+  });
+});
+
 describe('VenalabsStellarSDK Export', () => {
   it('should be exported as default', async () => {
     // Dynamic import to test default export

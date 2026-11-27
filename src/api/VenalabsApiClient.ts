@@ -18,7 +18,7 @@ import {
   VenalabsNftVoucherResponse,
   VenalabsNftVerifyRequest,
 } from '../types';
-import { VenalabsApiError } from './errors';
+import { VenalabsApiError, VenalabsErrorCodes } from './errors';
 import { fetchWithRetry, FetchWithRetryOptions } from './fetchWithRetry';
 
 const DEFAULT_BASE_URL = 'https://api.venalabs.com';
@@ -88,40 +88,72 @@ export class VenalabsApiClient {
 
   /**
    * Refresh the access token
-   * Used on initialization and after 401 responses
+   * Used on initialization and after 401 responses.
+   * Concurrent callers share a single call to the token provider.
    */
-  private async refreshToken(): Promise<string> {
-    // Prevent multiple concurrent token fetches
+  private refreshToken(): Promise<string> {
     if (this.tokenPromise) {
       return this.tokenPromise;
     }
 
-    this.tokenPromise = this.tokenProvider()
-      .then((token) => {
-        this.cachedToken = token;
+    const pending = this.fetchTokenFromProvider().finally(() => {
+      if (this.tokenPromise === pending) {
         this.tokenPromise = null;
-        return token;
-      })
-      .catch((error) => {
-        this.tokenPromise = null;
-        throw error;
-      });
+      }
+    });
+    this.tokenPromise = pending;
 
-    return this.tokenPromise;
+    return pending;
   }
 
   /**
-   * Clear cached token (called on 401)
+   * Call the token provider and validate what it returns, so that a missing
+   * token never reaches the API as "Bearer undefined"
    */
-  private clearToken(): void {
-    this.cachedToken = null;
+  private async fetchTokenFromProvider(): Promise<string> {
+    let token: unknown;
+    try {
+      token = await this.tokenProvider();
+    } catch (error) {
+      if (error instanceof VenalabsApiError) {
+        throw error;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new VenalabsApiError(
+        VenalabsErrorCodes.INVALID_TOKEN,
+        0,
+        `getAccessToken failed: ${reason}`
+      );
+    }
+
+    if (typeof token !== 'string' || token.trim() === '') {
+      throw new VenalabsApiError(
+        VenalabsErrorCodes.INVALID_TOKEN,
+        0,
+        'getAccessToken returned an empty token'
+      );
+    }
+
+    this.cachedToken = token;
+    return token;
+  }
+
+  /**
+   * Get a fresh token after a 401 received with `rejectedToken`.
+   * When another request has already replaced that token, the current one is
+   * reused instead of calling the token provider again.
+   */
+  private async renewToken(rejectedToken: string): Promise<void> {
+    if (this.cachedToken === rejectedToken) {
+      this.cachedToken = null;
+    }
+    await this.getToken();
   }
 
   /**
    * Build common headers for SDK requests
    */
-  private async getHeaders(): Promise<HeadersInit> {
-    const token = await this.getToken();
+  private buildHeaders(token: string): HeadersInit {
     return {
       'Content-Type': 'application/json',
       'X-Api-Key': this.apiKey,
@@ -130,81 +162,90 @@ export class VenalabsApiClient {
   }
 
   /**
-   * Build fetch retry options
+   * Build fetch retry options.
+   * Only GET requests are retried automatically on 5xx, timeout or network
+   * errors: the POST endpoints (start, complete, link, verify, nft-verify)
+   * are not idempotent and must not be replayed blindly.
    */
-  private getRetryOptions(): FetchWithRetryOptions {
+  private getRetryOptions(method: 'GET' | 'POST'): FetchWithRetryOptions {
     return {
       timeout: this.timeout,
-      retries: 1,
+      retries: method === 'GET' ? 1 : 0,
       retryDelay: 2000,
     };
   }
 
   /**
-   * Make a GET request to the SDK API
+   * Parse a successful response. An empty body (204, or 200 without content)
+   * resolves to undefined instead of failing on JSON parsing.
    */
-  private async get<T>(endpoint: string, isRetry = false): Promise<T> {
+  private async parseBody<T>(response: Response): Promise<T> {
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const text = await response.text();
+    if (text.trim() === '') {
+      return undefined as T;
+    }
+
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new VenalabsApiError(
+        VenalabsErrorCodes.UNKNOWN,
+        response.status,
+        'The API returned a response that is not valid JSON'
+      );
+    }
+  }
+
+  /**
+   * Make a request to the SDK API, with a single replay after a 401
+   */
+  private async request<T>(method: 'GET' | 'POST', endpoint: string, body?: unknown): Promise<T> {
     const url = `${this.baseUrl}/api/v1/sdk${endpoint}`;
 
-    const response = await fetchWithRetry(
-      url,
-      {
-        method: 'GET',
-        headers: await this.getHeaders(),
-      },
-      this.getRetryOptions()
-    );
+    for (let attempt = 0; ; attempt++) {
+      const token = await this.getToken();
 
-    // Handle 401 with token refresh
-    if (response.status === 401 && !isRetry) {
-      this.clearToken();
-      await this.refreshToken();
-      return this.get<T>(endpoint, true);
+      const response = await fetchWithRetry(
+        url,
+        {
+          method,
+          headers: this.buildHeaders(token),
+          body: method === 'POST' && body ? JSON.stringify(body) : undefined,
+        },
+        this.getRetryOptions(method)
+      );
+
+      // Handle 401 with token refresh (the request was not processed)
+      if (response.status === 401 && attempt === 0) {
+        await this.renewToken(token);
+        continue;
+      }
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => ({}))) as ApiErrorBody;
+        throw VenalabsApiError.fromResponse(response.status, errorBody);
+      }
+
+      return this.parseBody<T>(response);
     }
+  }
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
-      throw VenalabsApiError.fromResponse(response.status, body);
-    }
-
-    return response.json() as Promise<T>;
+  /**
+   * Make a GET request to the SDK API
+   */
+  private get<T>(endpoint: string): Promise<T> {
+    return this.request<T>('GET', endpoint);
   }
 
   /**
    * Make a POST request to the SDK API
    */
-  private async post<T>(endpoint: string, body?: unknown, isRetry = false): Promise<T> {
-    const url = `${this.baseUrl}/api/v1/sdk${endpoint}`;
-
-    const response = await fetchWithRetry(
-      url,
-      {
-        method: 'POST',
-        headers: await this.getHeaders(),
-        body: body ? JSON.stringify(body) : undefined,
-      },
-      this.getRetryOptions()
-    );
-
-    // Handle 401 with token refresh
-    if (response.status === 401 && !isRetry) {
-      this.clearToken();
-      await this.refreshToken();
-      return this.post<T>(endpoint, body, true);
-    }
-
-    if (!response.ok) {
-      const errorBody = (await response.json().catch(() => ({}))) as ApiErrorBody;
-      throw VenalabsApiError.fromResponse(response.status, errorBody);
-    }
-
-    // Handle empty responses (204 No Content)
-    const contentLength = response.headers.get('content-length');
-    if (response.status === 204 || contentLength === '0') {
-      return undefined as T;
-    }
-
-    return response.json() as Promise<T>;
+  private post<T>(endpoint: string, body?: unknown): Promise<T> {
+    return this.request<T>('POST', endpoint, body);
   }
 
   // ============================================================
@@ -301,7 +342,10 @@ export class VenalabsApiClient {
       throw new Error('courseId is required');
     }
     try {
-      return await this.get<VenalabsProgress>(`/progress/${encodeURIComponent(courseId)}`);
+      const progress = await this.get<VenalabsProgress | undefined>(
+        `/progress/${encodeURIComponent(courseId)}`
+      );
+      return progress ?? null;
     } catch (error) {
       if (error instanceof VenalabsApiError && error.code === 'NOT_FOUND') {
         return null;

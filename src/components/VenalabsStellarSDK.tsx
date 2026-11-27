@@ -10,6 +10,7 @@ import {
   useCallback,
   useMemo,
   useEffect,
+  useRef,
   ReactNode,
 } from 'react';
 import { VenalabsApiClient } from '../api';
@@ -215,15 +216,21 @@ function VenalabsStellarSDKProvider({
   baseUrl,
   children,
 }: VenalabsStellarSDKProviderProps) {
+  // Hosts often pass an inline `getAccessToken` function, whose identity
+  // changes on every render. The latest one is kept in a ref so the API client
+  // (and its cached token) is not recreated each time.
+  const getAccessTokenRef = useRef(getAccessToken);
+  getAccessTokenRef.current = getAccessToken;
+
   // Create API client
   const apiClient = useMemo(
     () =>
       new VenalabsApiClient({
         apiKey,
-        getAccessToken,
+        getAccessToken: () => getAccessTokenRef.current(),
         baseUrl,
       }),
-    [apiKey, getAccessToken, baseUrl]
+    [apiKey, baseUrl]
   );
 
   // Create i18n context value
