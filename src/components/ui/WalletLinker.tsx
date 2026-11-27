@@ -41,6 +41,8 @@ export function WalletLinker({
 
   const [linking, setLinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Name of the network selected in the wallet when it differs from `network`
+  const [mismatchedNetwork, setMismatchedNetwork] = useState<string | null>(null);
 
   const isLinked = linkedWalletAddress && linkedWalletAddress === stellarAddress;
   const hasOtherLinkedWallet = linkedWalletAddress && linkedWalletAddress !== stellarAddress;
@@ -61,18 +63,20 @@ export function WalletLinker({
 
     setLinking(true);
     setError(null);
+    setMismatchedNetwork(null);
 
     try {
       // The passphrase comes from the network of the checker; an unknown
       // network stops here with an explicit error
       const passphrase = getNetworkPassphrase(network);
 
-      // Do not ask for a signature while the wallet is set to another network
-      const walletNetwork = await findWalletNetworkMismatch(getWalletNetwork, network);
-      if (walletNetwork) {
-        setError(t('wallet.networkMismatch', { actual: walletNetwork, expected: network }));
-        setLinking(false);
-        return;
+      // Linking only signs a message, which works whatever network the wallet
+      // is set to: a different network is reported, without blocking. Signing a
+      // transaction (NFT mint) is where the network is enforced.
+      try {
+        setMismatchedNetwork(await findWalletNetworkMismatch(getWalletNetwork, network));
+      } catch (networkError) {
+        console.warn('[WalletLinker] Could not read the wallet network:', networkError);
       }
 
       // 1. Get nonce from backend
@@ -200,6 +204,16 @@ export function WalletLinker({
             {formatAddress(linkedWalletAddress)}
           </span>
           <span className="venalabs-wallet-linker__warning">{t('wallet.switchWalletWarning')}</span>
+        </div>
+      )}
+
+      {/* Wallet set to another network: a warning, linking is not blocked */}
+      {mismatchedNetwork && (
+        <div className="venalabs-wallet-linker__network-warning" role="status">
+          {t('wallet.networkMismatchLinkWarning', {
+            actual: mismatchedNetwork,
+            expected: network,
+          })}
         </div>
       )}
 

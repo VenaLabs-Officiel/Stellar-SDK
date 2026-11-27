@@ -183,7 +183,8 @@ describe('Wallet linking: signing network', () => {
     ]);
   });
 
-  it('does not sign when the wallet is set to another network, and says which one to select', async () => {
+  it('links even when the wallet is set to another network, with a warning that does not block', async () => {
+    // Linking only signs a message: the network selected in the wallet does not matter
     mocks.wallet.current.getWalletNetwork = vi
       .fn()
       .mockResolvedValue({ network: 'PUBLIC', networkPassphrase: PUBLIC_PASSPHRASE });
@@ -191,14 +192,46 @@ describe('Wallet linking: signing network', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Link Wallet' }));
 
+    await waitFor(() =>
+      expect(onWalletLinked).toHaveBeenCalledWith(USER_ADDRESS, 'STELLAR_TESTNET')
+    );
+    expect(mocks.wallet.current.signMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Nonce: nonce-1'),
+      TESTNET_PASSPHRASE
+    );
+    expect(api.linkBodies).toEqual([
+      { walletAddress: USER_ADDRESS, signature: 'signature', network: 'STELLAR_TESTNET' },
+    ]);
+
+    const warning = screen.getByText(
+      'Your wallet is set to another network (PUBLIC). You can link it, but switch it to STELLAR_TESTNET before signing a transaction.'
+    );
+    expect(warning).toHaveClass('venalabs-wallet-linker__network-warning');
+    expect(document.querySelector('.venalabs-wallet-linker__error')).not.toBeInTheDocument();
+  });
+
+  it('shows no network warning when the wallet reports the expected network', async () => {
+    mocks.wallet.current.getWalletNetwork = vi
+      .fn()
+      .mockResolvedValue({ network: 'TESTNET', networkPassphrase: TESTNET_PASSPHRASE });
+    const { onWalletLinked } = renderChecker(makeChecker());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link Wallet' }));
+
+    await waitFor(() => expect(onWalletLinked).toHaveBeenCalled());
     expect(
-      await screen.findByText(
-        'Your wallet is set to another network (PUBLIC). Switch it to STELLAR_TESTNET, then try again.'
-      )
-    ).toBeInTheDocument();
-    expect(mocks.wallet.current.signMessage).not.toHaveBeenCalled();
-    expect(api.linkBodies).toEqual([]);
-    expect(onWalletLinked).not.toHaveBeenCalled();
+      document.querySelector('.venalabs-wallet-linker__network-warning')
+    ).not.toBeInTheDocument();
+  });
+
+  it('still links when the wallet network cannot be read at all', async () => {
+    mocks.wallet.current.getWalletNetwork = vi.fn().mockRejectedValue(new Error('unsupported'));
+    const { onWalletLinked } = renderChecker(makeChecker());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link Wallet' }));
+
+    await waitFor(() => expect(onWalletLinked).toHaveBeenCalled());
+    expect(document.querySelector('.venalabs-wallet-linker__error')).not.toBeInTheDocument();
   });
 
   it('signs when the wallet reports the expected network', async () => {

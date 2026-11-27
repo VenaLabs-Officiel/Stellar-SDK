@@ -2075,6 +2075,12 @@
   font-size: 0.75rem;
 }
 
+.venalabs-wallet-linker__network-warning {
+  margin-top: 0.5rem;
+  color: rgb(var(--venalabs-warning));
+  font-size: 0.875rem;
+}
+
 .venalabs-wallet-linker__error {
   margin-top: 0.5rem;
   color: rgb(var(--venalabs-error));

@@ -47,6 +47,8 @@ const translations = {
     'wallet.switchWalletWarning': '(Connect this wallet or link the connected one)',
     'wallet.networkMismatch':
       'Your wallet is set to another network ({actual}). Switch it to {expected}, then try again.',
+    'wallet.networkMismatchLinkWarning':
+      'Your wallet is set to another network ({actual}). You can link it, but switch it to {expected} before signing a transaction.',
 
     // Courses
     'courses.notFound': 'Course not found',
@@ -175,6 +177,8 @@ const translations = {
     'wallet.switchWalletWarning': '(Connectez ce portefeuille ou liez celui connecté)',
     'wallet.networkMismatch':
       'Votre portefeuille est réglé sur un autre réseau ({actual}). Passez-le sur {expected}, puis réessayez.',
+    'wallet.networkMismatchLinkWarning':
+      'Votre portefeuille est réglé sur un autre réseau ({actual}). Vous pouvez le lier, mais passez-le sur {expected} avant de signer une transaction.',
 
     // Courses
     'courses.notFound': 'Cours non trouvé',
