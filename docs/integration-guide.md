@@ -1,360 +1,202 @@
-# Venalabs Stellar SDK - Integration Guide
+# VenaLabs Stellar SDK: Integration Guide
 
-This guide will help you integrate the Venalabs Stellar SDK into your website to display Stellar courses to your users.
+This guide shows how to embed VenaLabs Stellar courses in a React application with `@venalabs/stellar-sdk` 2.0.1.
+
+## How it works
+
+1. Your server holds an API key and an API secret.
+2. When a signed-in user opens the courses page, your server asks the VenaLabs API for an access token for that user.
+3. The browser passes the API key and that token to the SDK component. The SDK calls the VenaLabs API with both.
+
+The API secret never leaves your server. The API key is public: it identifies your organization and is safe to ship in client-side code.
 
 ## Prerequisites
 
-Before you begin, make sure you have:
-
-1. An Airdroped B2B account with SDK access
-2. Your **API Key** and **Secret Key** from the Airdroped dashboard
-3. Your **Organization ID** from the dashboard
-4. A React 18+ application
+- A React 18 application
+- An **API key** and an **API secret** from the VenaLabs dashboard
+- A backend where you can add one endpoint
 
 ## Step 1: Install the SDK
 
 ```bash
 npm install @venalabs/stellar-sdk
-# or
-yarn add @venalabs/stellar-sdk
 ```
 
-## Step 2: Generate User Tokens (Backend)
+## Step 2: Add a token endpoint to your server
 
-The SDK requires a JWT token to identify users. This token must be generated on your backend for security reasons.
+Your server exchanges its credentials for a user access token:
 
-### Token Requirements
+```
+POST https://api.venalabs.com/api/v1/sdk/auth/token
+```
 
-- Algorithm: HS256
-- Signed with: Your Secret Key (from dashboard)
-- Max validity: 24 hours
+| Part          | Value                                                   |
+| ------------- | ------------------------------------------------------- |
+| Header        | `X-Api-Key: <your API key>`                             |
+| Header        | `X-Api-Secret: <your API secret>`                       |
+| Header        | `Content-Type: application/json`                        |
+| Request body  | `{ "userId": "<the user's id in your system>" }`        |
+| Response body | `{ "token": "<access token>", "expiresIn": <seconds> }` |
 
-### Required Claims
+The token is valid for 24 hours (`expiresIn` is `86400`). The API answers HTTP 401 when a header is missing or the credentials are wrong.
 
-| Claim | Type | Description |
-|-------|------|-------------|
-| `sub` | string | Unique user ID in your system |
-| `orgId` | string | Your organization ID |
-| `iat` | number | Issued at timestamp |
-| `exp` | number | Expiration timestamp |
+`userId` is the identifier of the user in your own system. Course progress is stored against it, so use a stable value.
 
-### Example: Node.js/Express Backend
+### Example: Node.js / Express
 
 ```javascript
 // routes/venalabs.js
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const router = express.Router();
 
-const VENALABS_SECRET_KEY = process.env.VENALABS_SECRET_KEY;
-const VENALABS_ORG_ID = process.env.VENALABS_ORG_ID;
-
-router.get('/token', (req, res) => {
-  // Ensure user is authenticated in your system
+router.get('/venalabs-token', async (req, res) => {
+  // Only issue tokens to users authenticated in your system
   if (!req.user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const token = jwt.sign(
-    {
-      sub: req.user.id,
-      orgId: VENALABS_ORG_ID
+  const response = await fetch('https://api.venalabs.com/api/v1/sdk/auth/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Api-Key': process.env.VENALABS_API_KEY,
+      'X-Api-Secret': process.env.VENALABS_API_SECRET,
     },
-    VENALABS_SECRET_KEY,
-    { expiresIn: '24h' }
-  );
+    body: JSON.stringify({ userId: String(req.user.id) }),
+  });
 
-  res.json({ token });
+  if (!response.ok) {
+    return res.status(502).json({ error: 'Could not get a VenaLabs token' });
+  }
+
+  // The API answers { token, expiresIn }
+  const data = await response.json();
+  res.json({ token: data.token });
 });
 
 module.exports = router;
 ```
 
-### Example: PHP/Laravel Backend
+Mount the router so that the endpoint is reachable at `/api/venalabs-token` (for example `app.use('/api', router)`). The built-in `fetch` requires Node.js 18 or later.
 
-```php
-// routes/api.php
-use Firebase\JWT\JWT;
+## Step 3: Render the SDK
 
-Route::middleware('auth')->get('/venalabs/token', function (Request $request) {
-    $payload = [
-        'sub' => $request->user()->id,
-        'orgId' => config('services.venalabs.org_id'),
-        'iat' => time(),
-        'exp' => time() + 86400
-    ];
-
-    $token = JWT::encode(
-        $payload,
-        config('services.venalabs.secret_key'),
-        'HS256'
-    );
-
-    return response()->json(['token' => $token]);
-});
-```
-
-### Example: Python/Django Backend
-
-```python
-# views.py
-import jwt
-from datetime import datetime, timedelta
-from django.conf import settings
-from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
-
-@login_required
-def venalabs_token(request):
-    payload = {
-        'sub': str(request.user.id),
-        'orgId': settings.VENALABS_ORG_ID,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(hours=24)
-    }
-
-    token = jwt.encode(
-        payload,
-        settings.VENALABS_SECRET_KEY,
-        algorithm='HS256'
-    )
-
-    return JsonResponse({'token': token})
-```
-
-## Step 3: Integrate the SDK (Frontend)
-
-### Basic Integration
+The component takes the API key and a `getAccessToken` function. The SDK calls this function when it starts, and again whenever the API answers 401, so it must return a fresh token each time it is called.
 
 ```tsx
-import { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import VenalabsStellarSDK from '@venalabs/stellar-sdk';
 import '@venalabs/stellar-sdk/style.css';
 
-function CoursesPage() {
-  const [userToken, setUserToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function fetchToken() {
-      try {
-        const response = await fetch('/api/venalabs/token', {
-          credentials: 'include' // Important for cookies/session
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to get token');
-        }
-
-        const data = await response.json();
-        setUserToken(data.token);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchToken();
-  }, []);
-
-  if (loading) return <div>Loading courses...</div>;
-  if (error) return <div>Error: {error}</div>;
-  if (!userToken) return <div>Unable to load courses</div>;
-
-  return (
-    <VenalabsStellarSDK
-      apiKey={process.env.NEXT_PUBLIC_VENALABS_API_KEY}
-      userToken={userToken}
-      lang="en"
-      stellarNetwork="PUBLIC"
-    />
-  );
-}
-
-export default CoursesPage;
-```
-
-### Next.js App Router Integration
-
-```tsx
-// app/courses/page.tsx
-import { cookies } from 'next/headers';
-import { CoursesClient } from './CoursesClient';
-
-async function getVenalabsToken() {
-  // Server-side token generation
-  const jwt = require('jsonwebtoken');
-  const userId = cookies().get('userId')?.value;
-
-  if (!userId) return null;
-
-  return jwt.sign(
-    { sub: userId, orgId: process.env.VENALABS_ORG_ID },
-    process.env.VENALABS_SECRET_KEY,
-    { expiresIn: '24h' }
-  );
-}
-
-export default async function CoursesPage() {
-  const token = await getVenalabsToken();
-
-  if (!token) {
-    return <div>Please log in to view courses</div>;
-  }
-
-  return <CoursesClient token={token} />;
-}
-```
-
-```tsx
-// app/courses/CoursesClient.tsx
-'use client';
-
-import VenalabsStellarSDK from '@venalabs/stellar-sdk';
-import '@venalabs/stellar-sdk/style.css';
-
-export function CoursesClient({ token }: { token: string }) {
-  return (
-    <VenalabsStellarSDK
-      apiKey={process.env.NEXT_PUBLIC_VENALABS_API_KEY!}
-      userToken={token}
-      lang="en"
-    />
-  );
-}
-```
-
-## Step 4: Configure Your Domain
-
-1. Log in to your Airdroped dashboard
-2. Go to **SDK Settings**
-3. Add your domain(s) to the allowed list:
-   - `https://yourdomain.com`
-   - `https://staging.yourdomain.com` (if applicable)
-   - `http://localhost:3000` (for development)
-
-## SDK Configuration Options
-
-### Props Reference
-
-| Prop | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `apiKey` | string | Yes | - | Your API Key |
-| `userToken` | string | Yes | - | JWT token for user |
-| `lang` | 'fr' \| 'en' | No | 'fr' | UI language |
-| `stellarNetwork` | 'TESTNET' \| 'PUBLIC' | No | 'TESTNET' | Blockchain network |
-| `minHeight` | string \| number | No | 600 | Minimum container height |
-| `className` | string | No | '' | Custom CSS class |
-| `baseUrl` | string | No | Production | API URL (for testing) |
-| `externalWalletKit` | StellarWalletsKit | No | - | Existing wallet instance |
-
-### Using with Existing Stellar Wallet
-
-If your app already uses `@creit.tech/stellar-wallets-kit`, you can pass your existing instance:
-
-```tsx
-import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit';
-import VenalabsStellarSDK from '@venalabs/stellar-sdk';
-
-function App() {
-  const [walletKit, setWalletKit] = useState<StellarWalletsKit | null>(null);
-
-  useEffect(() => {
-    const kit = new StellarWalletsKit({
-      network: 'PUBLIC',
-      // your config
+export function CoursesPage() {
+  const getAccessToken = useCallback(async () => {
+    const res = await fetch('/api/venalabs-token', {
+      credentials: 'include', // send your session cookie
     });
-    setWalletKit(kit);
+
+    if (!res.ok) {
+      throw new Error('Failed to get access token');
+    }
+
+    // Matches the server example above, which answers { token }
+    const data = await res.json();
+    return data.token;
   }, []);
 
   return (
     <VenalabsStellarSDK
       apiKey="your-api-key"
-      userToken={token}
-      externalWalletKit={walletKit}
+      getAccessToken={getAccessToken}
+      lang="en"
+      stellarNetwork="TESTNET"
     />
   );
 }
 ```
 
+With Next.js, render the component from a client component (a file that starts with `'use client'`).
+
+## Props reference
+
+| Prop                | Type                        | Required | Default                    | Description                                             |
+| ------------------- | --------------------------- | -------- | -------------------------- | ------------------------------------------------------- |
+| `apiKey`            | `string`                    | Yes      | -                          | Your API key                                            |
+| `getAccessToken`    | `() => Promise<string>`     | Yes      | -                          | Returns a user access token (called on init and on 401) |
+| `lang`              | `'fr' \| 'en'`              | No       | `'en'`                     | UI language                                             |
+| `stellarNetwork`    | `'TESTNET' \| 'PUBLIC'`     | No       | `'TESTNET'`                | Network used by the built-in wallet connection          |
+| `minHeight`         | `string \| number`          | No       | `600`                      | Minimum container height                                |
+| `className`         | `string`                    | No       | `''`                       | Custom CSS class for the container                      |
+| `baseUrl`           | `string`                    | No       | `https://api.venalabs.com` | API base URL (for testing)                              |
+| `externalWalletKit` | `StellarWalletsKit \| null` | No       | -                          | Existing wallet kit instance                            |
+
+## Choosing the network
+
+`stellarNetwork` defaults to `TESTNET`. For a course that runs on the public network (mainnet), pass `stellarNetwork="PUBLIC"`.
+
+## Using an existing wallet kit
+
+If your app already has a `@creit.tech/stellar-wallets-kit` instance, pass it as `externalWalletKit`. The SDK then uses your instance as is and ignores `stellarNetwork`, so configure the network on your own kit.
+
+```tsx
+<VenalabsStellarSDK
+  apiKey="your-api-key"
+  getAccessToken={getAccessToken}
+  externalWalletKit={walletKit}
+/>
+```
+
+Without `externalWalletKit`, the SDK creates its own kit with the Freighter wallet.
+
 ## Styling
 
-### Default Styles
-
-Import the default CSS:
+Import the stylesheet once:
 
 ```tsx
 import '@venalabs/stellar-sdk/style.css';
 ```
 
-### Custom Styling
-
-Add custom styles using the `className` prop and CSS variables:
+Colors are CSS variables declared on `:root`. Their values are space-separated RGB channels, not hex codes:
 
 ```css
-/* Your custom styles */
-.my-courses-container {
-  --venalabs-primary: #your-brand-color;
-  --venalabs-background: #your-bg-color;
+:root {
+  --venalabs-primary: 99 102 241;
+  --venalabs-background: 17 24 39;
 }
 ```
 
-```tsx
-<VenalabsStellarSDK
-  className="my-courses-container"
-  // ...other props
-/>
-```
+The `className` prop adds a class to the SDK container.
 
-## Error Handling
+## Errors
 
-The SDK handles errors internally and displays user-friendly messages. Common errors:
+The SDK displays an error view when a request fails. Errors thrown by the API client are `VenalabsApiError` instances with one of these codes:
 
-| Error Code | Description | Solution |
-|------------|-------------|----------|
-| INVALID_API_KEY | API key is wrong or revoked | Check dashboard for correct key |
-| INVALID_TOKEN | JWT signature invalid | Verify secret key |
-| TOKEN_EXPIRED | JWT expired | Generate new token |
-| RATE_LIMITED | Too many requests | Implement caching |
-| NETWORK_ERROR | Connection issues | Check internet/CORS |
+| Code              | When                                                                   |
+| ----------------- | ---------------------------------------------------------------------- |
+| `INVALID_TOKEN`   | The API answered 401, even after the SDK called `getAccessToken` again |
+| `TOKEN_EXPIRED`   | The API reported an expired token                                      |
+| `INVALID_API_KEY` | The API answered 403                                                   |
+| `NOT_FOUND`       | The API answered 404                                                   |
+| `RATE_LIMITED`    | The API answered 429                                                   |
+| `SERVER_ERROR`    | The API answered with a 5xx status                                     |
+| `NETWORK_ERROR`   | The request could not reach the API                                    |
+| `TIMEOUT`         | The request timed out (30 seconds by default)                          |
+| `UNKNOWN`         | Any other failed response                                              |
 
-## Security Best Practices
+If you get `INVALID_TOKEN`, check that `apiKey` is active, that the token was created with the same API key, and that `getAccessToken` returns the `token` string itself.
 
-1. **Never expose your Secret Key** in client-side code
-2. **Always generate tokens server-side**
-3. **Validate users** before generating tokens
-4. **Use HTTPS** in production
-5. **Set short token expiration** (max 24h)
-6. **Whitelist only your production domains** in the dashboard
+## Security checklist
 
-## Testing
+- Keep the API secret on your server. Never ship it to the browser or commit it to a repository.
+- Issue tokens only to users you have authenticated.
+- Serve your token endpoint over HTTPS.
+- Access to the API is controlled by the API key and the access token. There is no domain allowlist to configure.
 
-### Development Environment
+## Known limitations
 
-Use testnet for development:
-
-```tsx
-<VenalabsStellarSDK
-  apiKey="your-test-api-key"
-  userToken={token}
-  stellarNetwork="TESTNET"
-/>
-```
-
-### Production Checklist
-
-- [ ] Switch to production API key
-- [ ] Set `stellarNetwork="PUBLIC"`
-- [ ] Remove localhost from allowed domains
-- [ ] Test token generation with production secret
-- [ ] Verify CORS settings
-- [ ] Test wallet connection flow
+See [Known limitations](../README.md#known-limitations) in the README.
 
 ## Support
 
-- **Documentation**: https://docs.airdroped.io/sdk
-- **GitHub Issues**: https://github.com/venalabs/venalabs-stellar-sdk/issues
-- **Email**: support@airdroped.io
-- **Discord**: https://discord.gg/airdroped
+- Documentation: https://venalabs.gitbook.io/venalabs-docs/
+- Issues: https://github.com/VenaLabs/Stellar-SDK/issues
+- Email: hello@venalabs.com
