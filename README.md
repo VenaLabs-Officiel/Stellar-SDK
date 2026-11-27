@@ -1,6 +1,6 @@
 # @venalabs/stellar-sdk
 
-[![CI](https://github.com/VenaLabs/Stellar-SDK/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VenaLabs/Stellar-SDK/actions/workflows/ci.yml)
+[![CI](https://github.com/VenaLabs-Officiel/Stellar-SDK/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VenaLabs-Officiel/Stellar-SDK/actions/workflows/ci.yml)
 
 Official React SDK for embedding VenaLabs Stellar courses in your website.
 
@@ -274,7 +274,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Release history is in [CHANGELOG.md](.
 ## Support
 
 - Documentation: https://venalabs.gitbook.io/venalabs-docs/
-- Issues: https://github.com/VenaLabs/Stellar-SDK/issues
+- Issues: https://github.com/VenaLabs-Officiel/Stellar-SDK/issues
 - Email: hello@venalabs.com
 
 ## License

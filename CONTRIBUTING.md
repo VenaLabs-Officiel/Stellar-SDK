@@ -10,7 +10,7 @@ Thanks for your interest in `@venalabs/stellar-sdk`.
 ## Setup
 
 ```bash
-git clone https://github.com/VenaLabs/Stellar-SDK.git
+git clone https://github.com/VenaLabs-Officiel/Stellar-SDK.git
 cd Stellar-SDK
 npm ci
 ```
@@ -38,7 +38,7 @@ npm run build
 
 ## Reporting issues
 
-Use [GitHub issues](https://github.com/VenaLabs/Stellar-SDK/issues) for bugs and feature requests. For security issues, follow [SECURITY.md](./SECURITY.md) instead.
+Use [GitHub issues](https://github.com/VenaLabs-Officiel/Stellar-SDK/issues) for bugs and feature requests. For security issues, follow [SECURITY.md](./SECURITY.md) instead.
 
 ## License
 

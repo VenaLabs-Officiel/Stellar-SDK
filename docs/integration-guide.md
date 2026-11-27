@@ -202,5 +202,5 @@ See [Known limitations](../README.md#known-limitations) in the README.
 ## Support
 
 - Documentation: https://venalabs.gitbook.io/venalabs-docs/
-- Issues: https://github.com/VenaLabs/Stellar-SDK/issues
+- Issues: https://github.com/VenaLabs-Officiel/Stellar-SDK/issues
 - Email: hello@venalabs.com
