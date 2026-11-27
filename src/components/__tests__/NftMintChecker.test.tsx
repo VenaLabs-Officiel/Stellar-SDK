@@ -262,6 +262,9 @@ function storePendingMint(expiresInSec = 180, address = USER_ADDRESS) {
   return expiresAtSec;
 }
 
+const SIMULATION_HINT =
+  'The mint transaction could not be prepared. If you already minted this NFT, verify to complete the step. Otherwise, please try again later.';
+
 async function clickMint() {
   const button = await screen.findByRole('button', { name: 'Mint NFT' });
   fireEvent.click(button);
@@ -632,6 +635,8 @@ describe('NftMintChecker: Soroban RPC that does not answer', () => {
     ).toBeInTheDocument();
     expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled();
+    // An RPC that does not answer says nothing about an earlier mint
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeDisabled();
   });
 
   it('gives the button back when the account lookup never answers', async () => {
@@ -691,7 +696,8 @@ describe('NftMintChecker: nft-verify failure after a confirmed mint', () => {
     // Minting again would replay a used voucher
     expect(screen.queryByRole('button', { name: 'Mint NFT' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Minted!' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeDisabled();
+    // Not a dead end: the backend detects the mint on-chain when the step is verified
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
 
     failing = false;
     fireEvent.click(screen.getByRole('button', { name: 'Record mint again' }));
@@ -700,6 +706,53 @@ describe('NftMintChecker: nft-verify failure after a confirmed mint', () => {
     expect(attempts).toBe(4);
     expect(mocks.rpc.sendTransaction).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
+  });
+});
+
+describe('NftMintChecker: verifying with a mint that is not recorded', () => {
+  it('completes the step when nft-verify keeps failing, and forgets the stored transaction', async () => {
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/nft-verify`, () =>
+        HttpResponse.json({ message: 'boom' }, { status: 500 })
+      ),
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: true })
+      )
+    );
+    const onVerificationSuccess = vi.fn();
+    renderChecker({ onVerificationSuccess });
+    await clickMint();
+    await screen.findByText(/Your NFT was minted on-chain, but the mint could not be recorded/);
+    // Still remembered: a reload must not offer a second mint
+    expect(sessionStorage.getItem(pendingKey())).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
+
+    expect(await screen.findByText('Verification passed!')).toBeInTheDocument();
+    await waitFor(() => expect(onVerificationSuccess).toHaveBeenCalledTimes(1));
+    expect(sessionStorage.getItem(pendingKey())).toBeNull();
+  });
+
+  it('can verify while the status of the transaction is unknown', async () => {
+    mocks.timing.confirmationGraceMs = -10 * 60 * 1000;
+    mockTxStatuses([rateLimited()]);
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: false, message: 'No mint found yet' })
+      )
+    );
+    renderChecker();
+    await clickMint();
+    await screen.findByText(/The transaction has not been confirmed yet/);
+
+    const verify = screen.getByRole('button', { name: 'Verify & Complete' });
+    expect(verify).toBeEnabled();
+    fireEvent.click(verify);
+
+    expect(await screen.findByText('No mint found yet')).toBeInTheDocument();
+    // The transaction is still followed
+    expect(screen.getByRole('button', { name: 'Check status' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeDisabled();
   });
 });
 
@@ -745,29 +798,71 @@ describe('NftMintChecker: unconfirmed transaction', () => {
 });
 
 describe('NftMintChecker: checks before signing', () => {
-  it('shows a clean message and does not sign when the simulation fails', async () => {
-    mocks.rpc.simulateTransaction.mockResolvedValue({ error: 'HostError: Error(WasmVm, ...)' });
+  // The contract panics when the voucher nonce was already used, but the panic
+  // text does not reliably come back from the wasm: no wording is relied upon
+  it.each([
+    ['HostError: Error(WasmVm, InvalidAction)'],
+    ['HostError: ... "Nonce already used for given name and slug" ...'],
+    [''],
+  ])('does not sign when the simulation fails (%j) and invites to verify', async (simError) => {
+    mocks.rpc.simulateTransaction.mockResolvedValue({ error: simError });
     renderChecker();
     await clickMint();
 
-    expect(
-      await screen.findByText('The mint transaction could not be prepared. Please try again later.')
-    ).toBeInTheDocument();
+    expect(await screen.findByText(SIMULATION_HINT)).toBeInTheDocument();
     expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
     expect(mocks.rpc.sendTransaction).not.toHaveBeenCalled();
+    // Neither a dead end nor a forced choice: both actions are available
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled();
   });
 
-  it('explains that the voucher was already used when the contract rejects its nonce', async () => {
-    mocks.rpc.simulateTransaction.mockResolvedValue({
-      error: 'HostError: ... "Nonce already used for given name and slug" ...',
-    });
+  it('completes the step by verifying when the NFT was already minted elsewhere', async () => {
+    // Minted in another tab or browser: the voucher is still PENDING and its nonce is used
+    mocks.rpc.simulateTransaction.mockResolvedValue({ error: 'HostError: Error(WasmVm, ...)' });
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: true })
+      )
+    );
+    const onVerificationSuccess = vi.fn();
+    renderChecker({ onVerificationSuccess });
+    await clickMint();
+    await screen.findByText(SIMULATION_HINT);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
+
+    expect(await screen.findByText('Verification passed!')).toBeInTheDocument();
+    await waitFor(() => expect(onVerificationSuccess).toHaveBeenCalledTimes(1));
+    expect(api.nftVerifyBodies).toEqual([]);
+  });
+
+  it('lets the user mint again when the verification finds no mint', async () => {
+    mocks.rpc.simulateTransaction.mockResolvedValueOnce({ error: 'HostError: temporary' });
+    server.use(
+      http.post(`${SDK}/courses/:courseId/steps/:stepId/verify`, () =>
+        HttpResponse.json({ passed: false })
+      )
+    );
     renderChecker();
     await clickMint();
+    await screen.findByText(SIMULATION_HINT);
 
+    fireEvent.click(screen.getByRole('button', { name: 'Verify & Complete' }));
     expect(
-      await screen.findByText(/This mint voucher has already been used on-chain/)
+      await screen.findByText('Verification failed. Make sure you have minted the NFT.')
     ).toBeInTheDocument();
-    expect(mocks.wallet.current.signTransaction).not.toHaveBeenCalled();
+
+    // The simulation works this time: the mint goes through
+    await clickMint();
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+  });
+
+  it('keeps "Verify & Complete" disabled as long as nothing suggests a mint', async () => {
+    renderChecker();
+
+    await screen.findByRole('button', { name: 'Mint NFT' });
+    expect(screen.getByRole('button', { name: 'Verify & Complete' })).toBeDisabled();
   });
 
   it('does not sign when the voucher recipient is not the connected wallet', async () => {

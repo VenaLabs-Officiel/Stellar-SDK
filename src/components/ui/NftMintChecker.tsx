@@ -140,6 +140,9 @@ export function NftMintChecker({
   const [pendingTx, setPendingTx] = useState<SubmittedTx | null>(null);
   // Transaction confirmed on-chain that the backend has not recorded yet
   const [unrecordedHash, setUnrecordedHash] = useState<string | null>(null);
+  // The simulation failed although the voucher is still PENDING: the NFT may
+  // have been minted already (other tab, other browser), so verifying is offered
+  const [mintMayExist, setMintMayExist] = useState(false);
 
   // Verify states
   const [verifying, setVerifying] = useState(false);
@@ -206,6 +209,7 @@ export function NftMintChecker({
     setTxHash(null);
     setPendingTx(null);
     setUnrecordedHash(null);
+    setMintMayExist(false);
     setResumedKey(null);
     setVerifying(false);
     setVerificationError(null);
@@ -343,6 +347,7 @@ export function NftMintChecker({
     setMintLoading(true);
     setMintPhase('preparing');
     setMintError(null);
+    setMintMayExist(false);
     setPrerequisitesMissing(false);
 
     try {
@@ -466,10 +471,14 @@ export function NftMintChecker({
       );
       if (StellarRpc.Api.isSimulationError(simResponse)) {
         console.error('[NftMintChecker] Simulation failed:', simResponse.error);
-        const alreadyUsed = String(simResponse.error).includes('Nonce already used');
-        update(() =>
-          setMintError(alreadyUsed ? t('nft.voucherAlreadyUsed') : t('nft.simulationFailed'))
-        );
+        // The voucher is still PENDING here. The most common cause is a nonce
+        // already used by a mint made elsewhere, but the contract error text is
+        // not reliable enough to tell: whatever the cause, the user is invited
+        // to verify (the backend detects the mint on-chain) or to try again.
+        update(() => {
+          setMintMayExist(true);
+          setMintError(t('nft.simulationFailedVerifyHint'));
+        });
         return;
       }
       const assembledTx = StellarRpc.assembleTransaction(tx, simResponse).build();
@@ -682,6 +691,10 @@ export function NftMintChecker({
       const result = await apiClient.verifyStep(courseId, stepId);
 
       if (result.passed) {
+        // The step is done: the submitted transaction needs no more tracking
+        if (storageKey) {
+          clearPendingMint(storageKey);
+        }
         setVerificationSuccess(true);
         deferCall(onVerificationSuccess, 500);
       } else {
@@ -693,7 +706,7 @@ export function NftMintChecker({
     }
 
     setVerifying(false);
-  }, [apiClient, courseId, stepId, onVerificationSuccess, deferCall, t]);
+  }, [apiClient, courseId, stepId, storageKey, onVerificationSuccess, deferCall, t]);
 
   // Get Stellar explorer URL
   const getExplorerUrl = (hash: string) => {
@@ -716,6 +729,11 @@ export function NftMintChecker({
 
   // The mint is done on-chain as soon as the transaction is confirmed
   const mintDone = mintSuccess || !!unrecordedHash;
+
+  // Verifying never needs the mint to be recorded: the backend looks for the
+  // mint transaction on-chain. It is offered as soon as a mint is known or
+  // plausible, so that no state is a dead end.
+  const canVerifyMint = mintSuccess || !!unrecordedHash || !!pendingTx || mintMayExist;
 
   return (
     <div className="venalabs-nft-mint-checker">
@@ -955,7 +973,7 @@ export function NftMintChecker({
             <GlassButton
               variant="primary"
               onClick={() => void handleVerify()}
-              disabled={verifying || !canMintOrVerify || !mintSuccess || verificationSuccess}
+              disabled={verifying || !canMintOrVerify || !canVerifyMint || verificationSuccess}
             >
               {verifying && <Loader2 className="venalabs-icon-sm venalabs-animate-spin" />}
               {verifying

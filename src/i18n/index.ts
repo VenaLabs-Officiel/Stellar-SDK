@@ -98,15 +98,15 @@ const translations = {
     'nft.networkBusy':
       'The Stellar network is busy and did not accept the transaction. Please try again in a moment.',
     'nft.simulationFailed': 'The mint transaction could not be prepared. Please try again later.',
-    'nft.voucherAlreadyUsed':
-      'This mint voucher has already been used on-chain. If the NFT is in your wallet, please contact support.',
+    'nft.simulationFailedVerifyHint':
+      'The mint transaction could not be prepared. If you already minted this NFT, verify to complete the step. Otherwise, please try again later.',
     'nft.recipientMismatch':
       'This NFT is reserved for wallet {address}. Connect and link that wallet, then try again.',
     'nft.unconfirmed':
       'The transaction has not been confirmed yet. Do not mint again: check its status first.',
     'nft.checkStatus': 'Check status',
     'nft.mintedNotRecorded':
-      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: record it again.',
+      'Your NFT was minted on-chain, but the mint could not be recorded yet. Do not mint again: record it again, or verify to complete the step.',
     'nft.retryRecord': 'Record mint again',
     'nft.prerequisitesNotCompleted':
       'Complete the previous courses of the map before minting this NFT.',
@@ -229,15 +229,15 @@ const translations = {
       "Le réseau Stellar est saturé et n'a pas accepté la transaction. Veuillez réessayer dans un instant.",
     'nft.simulationFailed':
       "La transaction de mint n'a pas pu être préparée. Veuillez réessayer plus tard.",
-    'nft.voucherAlreadyUsed':
-      'Ce voucher de mint a déjà été utilisé on-chain. Si le NFT est dans votre portefeuille, veuillez contacter le support.',
+    'nft.simulationFailedVerifyHint':
+      "La transaction de mint n'a pas pu être préparée. Si vous avez déjà minté ce NFT, lancez la vérification pour compléter l'étape. Sinon, veuillez réessayer plus tard.",
     'nft.recipientMismatch':
       'Ce NFT est réservé au portefeuille {address}. Connectez et liez ce portefeuille, puis réessayez.',
     'nft.unconfirmed':
       "La transaction n'est pas encore confirmée. Ne mintez pas à nouveau : vérifiez d'abord son statut.",
     'nft.checkStatus': 'Vérifier le statut',
     'nft.mintedNotRecorded':
-      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez son enregistrement.",
+      "Votre NFT a été minté on-chain, mais le mint n'a pas encore pu être enregistré. Ne mintez pas à nouveau : relancez son enregistrement, ou lancez la vérification pour compléter l'étape.",
     'nft.retryRecord': 'Enregistrer le mint à nouveau',
     'nft.prerequisitesNotCompleted':
       'Terminez les cours précédents de la carte avant de minter ce NFT.',
