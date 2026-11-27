@@ -66,6 +66,34 @@ export function CheckerVerification({
     details?: Record<string, string>;
   } | null>(null);
 
+  // Declared before the NFT_MINT early return so hooks run in the same order on every render
+  const handleVerify = useCallback(async () => {
+    setVerifying(true);
+    setVerificationError(null);
+    setVerificationSuccess(false);
+
+    try {
+      const result = await apiClient.verifyStep(courseId, stepId);
+
+      if (result.passed) {
+        setVerificationSuccess(true);
+        setVerificationDetails({
+          message: result.message || t('verification.passed'),
+          details: result.details,
+        });
+        setTimeout(() => {
+          onVerificationSuccess();
+        }, 500);
+      } else {
+        setVerificationError(result.message || t('verification.checkRequirements'));
+      }
+    } catch {
+      setVerificationError(t('verification.failed'));
+    }
+
+    setVerifying(false);
+  }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
+
   // For NFT_MINT checkers, use the dedicated component
   if (checker.type === 'NFT_MINT') {
     return (
@@ -106,33 +134,6 @@ export function CheckerVerification({
   // - Checker doesn't require wallet, OR
   // - Wallet is connected AND linked
   const canVerify = !requiresWallet || (isWalletConnected && isWalletLinked);
-
-  const handleVerify = useCallback(async () => {
-    setVerifying(true);
-    setVerificationError(null);
-    setVerificationSuccess(false);
-
-    try {
-      const result = await apiClient.verifyStep(courseId, stepId);
-
-      if (result.passed) {
-        setVerificationSuccess(true);
-        setVerificationDetails({
-          message: result.message || t('verification.passed'),
-          details: result.details,
-        });
-        setTimeout(() => {
-          onVerificationSuccess();
-        }, 500);
-      } else {
-        setVerificationError(result.message || t('verification.checkRequirements'));
-      }
-    } catch {
-      setVerificationError(t('verification.failed'));
-    }
-
-    setVerifying(false);
-  }, [apiClient, courseId, stepId, onVerificationSuccess, t]);
 
   // Helper message based on state
   const getHelperMessage = (): string | null => {
