@@ -367,6 +367,88 @@ describe('VenalabsStellarSDK: sorobanRpcUrl prop', () => {
   }, 20000);
 });
 
+describe('VenalabsStellarSDK: userKey prop and linked wallets', () => {
+  it('does not show the wallet linked by the previous user', async () => {
+    const map: VenalabsMap = {
+      id: 'map-1',
+      organizationId: 'org-1',
+      name: 'Map',
+      nodes: [{ id: 'node-1', courseId: COURSE_ID, courseName: { en: 'Mint course' }, x: 0, y: 0 }],
+      connections: [],
+      status: 'PUBLISHED',
+      createdOn: '',
+    };
+    const course: VenalabsCourse = {
+      id: COURSE_ID,
+      organizationId: 'org-1',
+      title: { en: 'Mint course' },
+      steps: [
+        {
+          id: STEP_ID,
+          title: { en: 'Mint step' },
+          type: 'EXE',
+          order: 0,
+          exeContent: {
+            instructions: { en: [] },
+            checkerId: 'checker-1',
+            checkerName: { en: 'Mint the badge' },
+            checkerType: 'NFT_MINT',
+            checkerNftMintConfig: { network: 'STELLAR_TESTNET', contractAddress: 'CCONTRACT' },
+          },
+        },
+      ],
+      status: 'PUBLISHED',
+      createdOn: '',
+    };
+    const isAlice = (request: Request) =>
+      request.headers.get('Authorization') === 'Bearer token-alice';
+    server.use(
+      http.get(`${SDK}/maps`, () => HttpResponse.json([map])),
+      http.get(`${SDK}/progress`, () => HttpResponse.json([])),
+      // Alice has linked the connected wallet; Bob's wallet request fails
+      http.get(`${SDK}/wallet`, ({ request }) =>
+        isAlice(request)
+          ? HttpResponse.json({ walletAddresses: { STELLAR_TESTNET: USER_ADDRESS } })
+          : HttpResponse.json({ message: 'boom' }, { status: 500 })
+      ),
+      http.get(`${SDK}/courses/${COURSE_ID}`, () => HttpResponse.json(course)),
+      http.post(`${SDK}/courses/${COURSE_ID}/start`, () => HttpResponse.json({})),
+      http.get(`${SDK}/courses/:courseId/steps/:stepId/nft-voucher`, ({ request }) =>
+        isAlice(request)
+          ? HttpResponse.json(pendingVoucher())
+          : HttpResponse.json({ message: 'NO_LINKED_WALLETS' }, { status: 400 })
+      )
+    );
+
+    const renderSdk = (user: string) => (
+      <VenalabsStellarSDK
+        apiKey="test-key"
+        getAccessToken={() => Promise.resolve(`token-${user}`)}
+        baseUrl={BASE_URL}
+        userKey={user}
+      />
+    );
+    const openMintStep = async () => {
+      fireEvent.click((await screen.findByText('Mint course')).closest('.venalabs-course-card')!);
+      fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+      await screen.findByRole('button', { name: 'Mint NFT' });
+    };
+
+    const { rerender } = render(renderSdk('alice'));
+    await openMintStep();
+    expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeEnabled();
+
+    rerender(renderSdk('bob'));
+    await openMintStep();
+
+    // The wallet linked by Alice is not Bob's: he has to link it himself
+    expect(screen.queryByText('Linked')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Link Wallet' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mint NFT' })).toBeDisabled();
+  }, 20000);
+});
+
 describe('NftMintChecker: transaction confirmation', () => {
   it('records the mint only after getTransaction reports SUCCESS', async () => {
     renderChecker();

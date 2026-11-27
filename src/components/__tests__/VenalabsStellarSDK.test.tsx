@@ -544,6 +544,131 @@ describe('VenalabsStellarSDK: API client stability', () => {
   });
 });
 
+describe('VenalabsStellarSDK: userKey prop', () => {
+  const mapFor = (name: string): VenalabsMap[] => [{ ...mockMaps[0]!, name }];
+
+  /** Maps, progress and course answers depend on the bearer token, like a real backend */
+  function serveByToken() {
+    const seen = { maps: [] as Array<string | null>, courses: [] as Array<string | null> };
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, ({ request }) => {
+        const auth = request.headers.get('Authorization');
+        seen.maps.push(auth);
+        return HttpResponse.json(
+          mapFor(auth === 'Bearer token-alice' ? 'Map of Alice' : 'Map of Bob')
+        );
+      }),
+      http.get(`${BASE_URL}/api/v1/sdk/courses/:courseId`, ({ request }) => {
+        seen.courses.push(request.headers.get('Authorization'));
+        return HttpResponse.json(mockCourse);
+      })
+    );
+    return seen;
+  }
+
+  const renderSdk = (user: string, userKey?: string) => (
+    <VenalabsStellarSDK
+      apiKey="test-key"
+      getAccessToken={() => Promise.resolve(`token-${user}`)}
+      baseUrl={BASE_URL}
+      userKey={userKey}
+    />
+  );
+
+  it('drops the cached token and reloads the data when userKey changes', async () => {
+    const seen = serveByToken();
+
+    const { rerender } = render(renderSdk('alice', 'alice'));
+    expect(await screen.findByText('Map of Alice')).toBeInTheDocument();
+
+    // The host signs another user in without remounting the SDK
+    rerender(renderSdk('bob', 'bob'));
+
+    expect(await screen.findByText('Map of Bob')).toBeInTheDocument();
+    expect(screen.queryByText('Map of Alice')).not.toBeInTheDocument();
+    expect(seen.maps).toEqual(['Bearer token-alice', 'Bearer token-bob']);
+  });
+
+  it('never shows the data of the previous user while the new one loads', async () => {
+    serveByToken();
+    let releaseBob: () => void = () => {};
+    const bobGate = new Promise<void>((resolve) => {
+      releaseBob = resolve;
+    });
+    server.use(
+      http.get(`${BASE_URL}/api/v1/sdk/maps`, async ({ request }) => {
+        if (request.headers.get('Authorization') === 'Bearer token-bob') {
+          await bobGate;
+          return HttpResponse.json(mapFor('Map of Bob'));
+        }
+        return HttpResponse.json(mapFor('Map of Alice'));
+      })
+    );
+
+    const { rerender } = render(renderSdk('alice', 'alice'));
+    expect(await screen.findByText('Map of Alice')).toBeInTheDocument();
+
+    rerender(renderSdk('bob', 'bob'));
+
+    // Immediately: loading state, nothing left of Alice
+    expect(screen.queryByText('Map of Alice')).not.toBeInTheDocument();
+    expect(document.querySelector('.venalabs-sdk-loading')).toBeInTheDocument();
+
+    releaseBob();
+    expect(await screen.findByText('Map of Bob')).toBeInTheDocument();
+  });
+
+  it('goes back to the map and uses the new token for the next requests', async () => {
+    const seen = serveByToken();
+
+    const { rerender } = render(renderSdk('alice', 'alice'));
+    fireEvent.click(
+      (await screen.findByText('Introduction to Web3')).closest('.venalabs-course-card')!
+    );
+    await waitFor(() => {
+      expect(document.querySelector('.venalabs-course-detail')).toBeInTheDocument();
+    });
+
+    rerender(renderSdk('bob', 'bob'));
+
+    expect(await screen.findByText('Map of Bob')).toBeInTheDocument();
+    expect(document.querySelector('.venalabs-course-detail')).not.toBeInTheDocument();
+
+    // The course is fetched again for the new user, not served from the old session
+    fireEvent.click(screen.getByText('Introduction to Web3').closest('.venalabs-course-card')!);
+    await waitFor(() => {
+      expect(document.querySelector('.venalabs-course-detail')).toBeInTheDocument();
+    });
+    expect(seen.courses).toEqual(['Bearer token-alice', 'Bearer token-bob']);
+  });
+
+  it('keeps the session when userKey stays the same across renders', async () => {
+    const seen = serveByToken();
+
+    const { rerender } = render(renderSdk('alice', 'alice'));
+    expect(await screen.findByText('Map of Alice')).toBeInTheDocument();
+
+    rerender(renderSdk('alice', 'alice'));
+    rerender(renderSdk('alice', 'alice'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(seen.maps).toEqual(['Bearer token-alice']);
+  });
+
+  it('behaves as before without userKey: a new getAccessToken alone does not reset the session', async () => {
+    const seen = serveByToken();
+
+    const { rerender } = render(renderSdk('alice'));
+    expect(await screen.findByText('Map of Alice')).toBeInTheDocument();
+
+    rerender(renderSdk('bob'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(seen.maps).toEqual(['Bearer token-alice']);
+    expect(screen.getByText('Map of Alice')).toBeInTheDocument();
+  });
+});
+
 describe('VenalabsStellarSDK Export', () => {
   it('should be exported as default', async () => {
     // Dynamic import to test default export

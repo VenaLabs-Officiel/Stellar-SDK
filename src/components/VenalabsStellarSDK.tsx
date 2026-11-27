@@ -17,6 +17,7 @@ import { VenalabsApiClient } from '../api';
 import { VenalabsApiError } from '../api/errors';
 import { I18nContext, createTranslator, useTranslation, SupportedLocale } from '../i18n';
 import { StellarWalletProvider, type StellarNetwork, type StellarWalletsKit } from '../wallet';
+import { useWalletStore } from '../store';
 import type {
   VenalabsMap,
   VenalabsProgress,
@@ -78,6 +79,18 @@ export interface VenalabsStellarSDKProps {
    * http:// is accepted for local development only.
    */
   sorobanRpcUrl?: string;
+  /**
+   * Identifier of the signed-in user: pass your user id. Changing it resets
+   * the SDK session: the cached access token is dropped (`getAccessToken` is
+   * called again), maps, progress and linked wallets are reloaded for the new
+   * user, and the view goes back to the map.
+   *
+   * Set it when your application can switch users without unmounting the
+   * component. The SDK keeps its API client and cached token across renders,
+   * so without `userKey` a new `getAccessToken` function alone does not switch
+   * users. It is only compared for equality and never sent to the API.
+   */
+  userKey?: string;
 }
 
 // ============================================================
@@ -658,9 +671,28 @@ export function VenalabsStellarSDK({
   baseUrl,
   externalWalletKit,
   sorobanRpcUrl,
+  userKey,
 }: VenalabsStellarSDKProps): JSX.Element {
   // Navigation state
   const [view, setView] = useState<SDKView>({ type: 'map' });
+
+  // A different user starts a new session: the provider below is remounted
+  // (new API client, no cached token, no data of the previous user) and the
+  // navigation goes back to the map.
+  const [sessionUserKey, setSessionUserKey] = useState(userKey);
+  if (sessionUserKey !== userKey) {
+    setSessionUserKey(userKey);
+    setView({ type: 'map' });
+  }
+
+  // The wallets linked by the previous user are not those of the new one
+  const previousUserKeyRef = useRef(userKey);
+  useEffect(() => {
+    if (previousUserKeyRef.current !== userKey) {
+      previousUserKeyRef.current = userKey;
+      useWalletStore.getState().setLinkedWallets({});
+    }
+  }, [userKey]);
 
   // Navigation functions
   const navigationValue = useMemo<SDKNavigationContextValue>(
@@ -705,6 +737,7 @@ export function VenalabsStellarSDK({
     >
       <StellarWalletProvider network={stellarNetwork} externalKit={externalWalletKit}>
         <VenalabsStellarSDKProvider
+          key={sessionUserKey ?? ''}
           apiKey={apiKey}
           getAccessToken={getAccessToken}
           lang={lang}
