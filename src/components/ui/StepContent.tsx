@@ -32,7 +32,8 @@ function cn(...classes: (string | boolean | undefined | null)[]): string {
 
 export interface StepContentProps {
   step: VenalabsCourseStep;
-  onComplete: (response?: unknown) => void;
+  /** May be asynchronous: the step shows a loading state until it settles */
+  onComplete: (response?: unknown) => void | Promise<void>;
   isCompleted: boolean;
   locale?: string;
   /** API client instance for wallet/verification operations */
@@ -331,7 +332,7 @@ function TextStepContent({
   isCompleted,
 }: {
   content: unknown[];
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
 }) {
   const { t } = useTranslation();
@@ -371,7 +372,7 @@ function VideoStepContent({
 }: {
   videoUrl: string;
   transcript?: string;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
 }) {
   const { t } = useTranslation();
@@ -445,7 +446,7 @@ function QuizStepContent({
   options: VenalabsQuizOption[];
   correctOptionIndex: number;
   explanation?: string;
-  onComplete: (response: unknown) => void;
+  onComplete: (response: unknown) => void | Promise<void>;
   isCompleted: boolean;
   locale: string;
 }) {
@@ -460,7 +461,7 @@ function QuizStepContent({
     if (selectedIndex === null) return;
     setSubmitted(true);
     if (selectedIndex === correctOptionIndex) {
-      onComplete({ selectedIndex, correct: true });
+      void onComplete({ selectedIndex, correct: true });
     }
   };
 
@@ -538,7 +539,7 @@ function ExeStepContent({
   onWalletLinked,
 }: {
   instructions: unknown[];
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
   apiClient?: VenalabsApiClient;
   courseId?: string;
@@ -573,7 +574,7 @@ function ExeStepContent({
           isCompleted={isCompleted}
           linkedWalletAddress={linkedWalletAddress}
           onWalletLinked={onWalletLinked}
-          onVerificationSuccess={onComplete}
+          onVerificationSuccess={() => void onComplete()}
         />
       </div>
     );
@@ -631,7 +632,7 @@ function RewardStepContent({
     rewardIconUrl?: string;
     amount: number;
   }>;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   isCompleted: boolean;
   locale: string;
 }) {

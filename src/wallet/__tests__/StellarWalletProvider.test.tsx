@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import type { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit';
 import {
   StellarWalletProvider,
@@ -94,5 +94,205 @@ describe('StellarWalletProvider: network', () => {
 
     await expect(wallet().getWalletNetwork()).resolves.toBeNull();
     warn.mockRestore();
+  });
+});
+
+describe('StellarWalletProvider: connect', () => {
+  const flush = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+  it('waits for the wallet selection before reading the address', async () => {
+    const { kit, modal } = createFakeKit();
+    const wallet = await renderProvider(kit);
+
+    let settled = false;
+    let connecting!: Promise<string | null>;
+    act(() => {
+      connecting = wallet().connect();
+      void connecting.then(() => {
+        settled = true;
+      });
+    });
+    await flush();
+
+    // The modal is displayed, nothing has been selected yet
+    expect(kit.openModal).toHaveBeenCalledTimes(1);
+    expect(kit.getAddress).not.toHaveBeenCalled();
+    expect(settled).toBe(false);
+    expect(wallet().isConnecting).toBe(true);
+    expect(wallet().isConnected).toBe(false);
+
+    // The user picks a wallet
+    await act(async () => {
+      modal.callbacks!.onWalletSelected({ id: 'freighter' });
+      await connecting;
+    });
+
+    await expect(connecting).resolves.toBe(ADDRESS);
+    expect(kit.setWallet).toHaveBeenCalledWith('freighter');
+    expect(wallet().stellarAddress).toBe(ADDRESS);
+    expect(wallet().isConnected).toBe(true);
+    expect(wallet().isConnecting).toBe(false);
+    expect(useWalletStore.getState().walletId).toBe('freighter');
+  });
+
+  it('resolves without an error when the user closes the modal', async () => {
+    const { kit, modal } = createFakeKit();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const wallet = await renderProvider(kit);
+
+    let connecting!: Promise<string | null>;
+    act(() => {
+      connecting = wallet().connect();
+    });
+    await flush();
+
+    await act(async () => {
+      modal.callbacks!.onClosed!(new Error('Modal closed'));
+      await connecting;
+    });
+
+    await expect(connecting).resolves.toBeNull();
+    expect(kit.getAddress).not.toHaveBeenCalled();
+    expect(wallet().isConnecting).toBe(false);
+    expect(wallet().isConnected).toBe(false);
+    // Closing the modal is not a failure: nothing to display, nothing logged as an error
+    expect(useWalletStore.getState().connectionError).toBeNull();
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('can be opened again after the modal was closed', async () => {
+    const { kit, modal } = createFakeKit();
+    const wallet = await renderProvider(kit);
+
+    let first!: Promise<string | null>;
+    act(() => {
+      first = wallet().connect();
+    });
+    await flush();
+    await act(async () => {
+      modal.callbacks!.onClosed!(new Error('Modal closed'));
+      await first;
+    });
+
+    let second!: Promise<string | null>;
+    act(() => {
+      second = wallet().connect();
+    });
+    await flush();
+    await act(async () => {
+      modal.callbacks!.onWalletSelected({ id: 'freighter' });
+      await second;
+    });
+
+    await expect(second).resolves.toBe(ADDRESS);
+    expect(kit.openModal).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not open a second modal while a connection is in progress', async () => {
+    const { kit, modal } = createFakeKit();
+    const wallet = await renderProvider(kit);
+
+    let first!: Promise<string | null>;
+    let second!: Promise<string | null>;
+    act(() => {
+      first = wallet().connect();
+      second = wallet().connect();
+    });
+    await flush();
+
+    expect(kit.openModal).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      modal.callbacks!.onWalletSelected({ id: 'freighter' });
+      await Promise.all([first, second]);
+    });
+
+    await expect(first).resolves.toBe(ADDRESS);
+    await expect(second).resolves.toBe(ADDRESS);
+  });
+
+  it('reports an error when the wallet refuses to share its address', async () => {
+    const { kit, modal } = createFakeKit();
+    kit.getAddress.mockRejectedValue(new Error('User declined access'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const wallet = await renderProvider(kit);
+
+    let connecting!: Promise<string | null>;
+    act(() => {
+      connecting = wallet().connect();
+    });
+    await flush();
+    await act(async () => {
+      modal.callbacks!.onWalletSelected({ id: 'freighter' });
+      await connecting;
+    });
+
+    await expect(connecting).resolves.toBeNull();
+    expect(useWalletStore.getState().connectionError).toBe('User declined access');
+    expect(wallet().isConnecting).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it('reports an error when the modal cannot be opened', async () => {
+    const { kit } = createFakeKit();
+    kit.openModal.mockRejectedValue(new Error('Stellar Wallets Kit modal is already open'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const wallet = await renderProvider(kit);
+
+    let connecting!: Promise<string | null>;
+    await act(async () => {
+      connecting = wallet().connect();
+      await connecting;
+    });
+
+    await expect(connecting).resolves.toBeNull();
+    expect(useWalletStore.getState().connectionError).toBe(
+      'Stellar Wallets Kit modal is already open'
+    );
+    expect(wallet().isConnecting).toBe(false);
+    errorSpy.mockRestore();
+  });
+});
+
+describe('StellarWalletProvider: disconnect', () => {
+  it('resets the wallet state and handles a rejected kit.disconnect()', async () => {
+    const { kit, modal } = createFakeKit();
+    kit.disconnect.mockRejectedValue(new Error('disconnect failed'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      const wallet = await renderProvider(kit);
+      let connecting!: Promise<string | null>;
+      act(() => {
+        connecting = wallet().connect();
+      });
+      await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+      await act(async () => {
+        modal.callbacks!.onWalletSelected({ id: 'freighter' });
+        await connecting;
+      });
+      expect(wallet().isConnected).toBe(true);
+
+      act(() => {
+        wallet().disconnect();
+      });
+      await act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+
+      expect(kit.disconnect).toHaveBeenCalledTimes(1);
+      expect(wallet().isConnected).toBe(false);
+      expect(wallet().stellarAddress).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[StellarWalletProvider] Disconnect error:',
+        expect.any(Error)
+      );
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      warnSpy.mockRestore();
+    }
   });
 });

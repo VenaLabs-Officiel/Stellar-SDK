@@ -9,6 +9,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   ReactNode,
   useMemo,
 } from 'react';
@@ -24,6 +25,14 @@ export type { StellarNetwork };
 
 /** Time allowed for the wallet to report its network before the check is skipped */
 const WALLET_NETWORK_TIMEOUT_MS = 3000;
+
+/** The user closed the wallet selection modal without choosing a wallet */
+class WalletModalClosedError extends Error {
+  constructor() {
+    super('Wallet selection cancelled');
+    this.name = 'WalletModalClosedError';
+  }
+}
 
 export interface StellarWalletContextValue {
   /** The wallet kit instance */
@@ -122,43 +131,82 @@ export function StellarWalletProvider({
     void initKit();
   }, [setConnectionError, kit, externalKit]);
 
+  // Connection in progress, shared by concurrent callers so that a single
+  // modal is opened
+  const connectPromiseRef = useRef<Promise<string | null> | null>(null);
+
   // Connect wallet
-  const connect = useCallback(async (): Promise<string | null> => {
+  const connect = useCallback((): Promise<string | null> => {
     if (!kit) {
       setConnectionError('Wallet kit not initialized');
-      return null;
+      return Promise.resolve(null);
+    }
+    if (connectPromiseRef.current) {
+      return connectPromiseRef.current;
     }
 
-    setIsConnecting(true);
+    // Order matters: the store's setConnectionError also clears isConnecting
     setConnectionError(null);
+    setIsConnecting(true);
 
-    try {
-      await kit.openModal({
-        // eslint-disable-next-line @typescript-eslint/require-await, @typescript-eslint/no-misused-promises -- tracked: functional fix in a follow-up PR
-        onWalletSelected: async (option: { id: string }) => {
-          kit.setWallet(option.id);
-          setWalletId(option.id);
+    // kit.openModal() resolves as soon as the modal is displayed, not when the
+    // user has chosen a wallet: wait for one of its two callbacks instead.
+    const selection = new Promise<string>((resolve, reject) => {
+      let walletSelected = false;
+      Promise.resolve(
+        kit.openModal({
+          onWalletSelected: (option: { id: string }) => {
+            walletSelected = true;
+            try {
+              kit.setWallet(option.id);
+              setWalletId(option.id);
+            } catch (error) {
+              reject(error);
+              return;
+            }
+            kit.getAddress().then(({ address }) => resolve(address), reject);
+          },
+          onClosed: () => {
+            // Ignored once a wallet was chosen: the address request decides
+            if (!walletSelected) {
+              reject(new WalletModalClosedError());
+            }
+          },
+        })
+      ).catch(reject);
+    });
+
+    const pending = selection
+      .then(
+        (address) => {
+          setStellarAddress(address);
+          return address;
         },
+        (error: unknown) => {
+          // The user closed the modal: not an error, nothing to display
+          if (!(error instanceof WalletModalClosedError)) {
+            console.error('[StellarWalletProvider] Connection failed:', error);
+            setConnectionError(error instanceof Error ? error.message : 'Connection failed');
+          }
+          return null;
+        }
+      )
+      .finally(() => {
+        connectPromiseRef.current = null;
+        setIsConnecting(false);
       });
 
-      const { address } = await kit.getAddress();
-      setStellarAddress(address);
-      setIsConnecting(false);
-      return address;
-    } catch (error) {
-      console.error('[StellarWalletProvider] Connection failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Connection failed';
-      setConnectionError(errorMessage);
-      setIsConnecting(false);
-      return null;
-    }
+    connectPromiseRef.current = pending;
+    return pending;
   }, [kit, setStellarAddress, setWalletId, setIsConnecting, setConnectionError]);
 
   // Disconnect wallet
   const disconnect = useCallback(() => {
     if (kit) {
       try {
-        void kit.disconnect();
+        Promise.resolve(kit.disconnect()).catch((error: unknown) => {
+          console.warn('[StellarWalletProvider] Disconnect error:', error);
+        });
       } catch (error) {
         console.warn('[StellarWalletProvider] Disconnect error:', error);
       }
