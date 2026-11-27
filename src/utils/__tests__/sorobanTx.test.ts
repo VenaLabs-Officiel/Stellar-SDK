@@ -79,6 +79,41 @@ describe('submitTransaction', () => {
     expect(sendTransaction).toHaveBeenCalledTimes(2);
   });
 
+  it('does not conclude to a failure when ERROR follows a lost answer', async () => {
+    // Attempt 1 reached the network but its answer was lost; attempt 2 is
+    // refused because the sequence number was consumed by attempt 1
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sendTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'ERROR', hash: HASH, errorResult: { code: 'txBadSeq' } });
+
+    await expect(submitTransaction({ sendTransaction }, {}, { sleep: noSleep })).resolves.toBe(
+      'UNKNOWN'
+    );
+    // No further resend: the on-chain status decides
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('ERROR'), {
+      code: 'txBadSeq',
+    });
+    errorSpy.mockRestore();
+  });
+
+  it('logs the errorResult of a rejected transaction', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const sendTransaction = vi
+      .fn()
+      .mockResolvedValue({ status: 'ERROR', hash: HASH, errorResult: { code: 'txBadAuth' } });
+
+    await expect(
+      submitTransaction({ sendTransaction }, {}, { sleep: noSleep })
+    ).rejects.toMatchObject({ reason: 'REJECTED' });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('ERROR'), {
+      code: 'txBadAuth',
+    });
+    errorSpy.mockRestore();
+  });
+
   it('reports UNKNOWN when every attempt fails at the network level', async () => {
     const sendTransaction = vi.fn().mockRejectedValue(new Error('Network Error'));
 

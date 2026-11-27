@@ -431,6 +431,34 @@ describe('NftMintChecker: transaction confirmation', () => {
     expect(api.nftVerifyBodies).toEqual([]);
   });
 
+  it('confirms a mint whose first sendTransaction answer was lost, even if the resend answers ERROR', async () => {
+    // The first send reached the network; the resend is refused (sequence already used)
+    mocks.rpc.sendTransaction
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'ERROR', hash: TX_HASH, errorResult: 'txBadSeq' });
+    mockTxStatuses(['NOT_FOUND', 'SUCCESS']);
+    renderChecker();
+    await clickMint();
+
+    expect(await screen.findByText('NFT minted successfully!')).toBeInTheDocument();
+    expect(api.nftVerifyBodies).toEqual([{ txHash: TX_HASH }]);
+    expect(screen.queryByText('Transaction failed. Please try again.')).not.toBeInTheDocument();
+  });
+
+  it('reports the on-chain failure when ERROR follows a lost answer and the transaction failed', async () => {
+    mocks.rpc.sendTransaction
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue({ status: 'ERROR', hash: TX_HASH });
+    mockTxStatuses(['FAILED']);
+    renderChecker();
+    await clickMint();
+
+    expect(
+      await screen.findByText('The mint transaction failed on-chain. Please try again.')
+    ).toBeInTheDocument();
+    expect(api.nftVerifyBodies).toEqual([]);
+  });
+
   it('resends on TRY_AGAIN_LATER, then confirms', async () => {
     mocks.rpc.sendTransaction
       .mockResolvedValueOnce({ status: 'TRY_AGAIN_LATER', hash: TX_HASH })

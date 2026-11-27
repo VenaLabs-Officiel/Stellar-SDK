@@ -10,18 +10,21 @@ import { sleep as defaultSleep } from './sleep';
 
 /** Subset of the Soroban RPC server used to submit a transaction */
 export interface SorobanSender<Tx> {
-  sendTransaction(tx: Tx): Promise<{ status: string }>;
+  sendTransaction(tx: Tx): Promise<{ status: string; errorResult?: unknown }>;
 }
 
 /**
  * - PENDING / DUPLICATE: the network knows the transaction, poll for its result
- * - UNKNOWN: every attempt failed at the network level, so the transaction may
- *   or may not have been received; poll for its result as well
+ * - UNKNOWN: the transaction may or may not have been received; poll for its
+ *   result as well. Either every attempt failed at the network level, or an
+ *   attempt whose answer was lost was followed by ERROR (the first attempt may
+ *   have consumed the sequence number, which makes the resend invalid).
  */
 export type SorobanSubmitStatus = 'PENDING' | 'DUPLICATE' | 'UNKNOWN';
 
 /**
- * - REJECTED: the RPC refused the transaction (status ERROR), it will not run
+ * - REJECTED: the RPC refused the transaction (status ERROR) and no earlier
+ *   attempt can have reached the network, so it will not run
  * - BUSY: the RPC kept answering TRY_AGAIN_LATER, the transaction was not queued
  */
 export type SorobanSubmitFailure = 'REJECTED' | 'BUSY';
@@ -50,6 +53,10 @@ export interface SubmitOptions {
  * TRY_AGAIN_LATER or on a network error. Resending is safe: it is the same
  * signed envelope, so the network answers DUPLICATE if it already has it.
  *
+ * ERROR is only final when no earlier attempt was lost: after a network error
+ * the first envelope may already be included, and the resend is then refused
+ * for its sequence number. In that case the on-chain status decides.
+ *
  * @throws SorobanSubmitError when the transaction is rejected or never queued
  */
 export async function submitTransaction<Tx>(
@@ -62,8 +69,11 @@ export async function submitTransaction<Tx>(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let status: string | null = null;
+    let errorResult: unknown;
     try {
-      status = (await server.sendTransaction(tx)).status;
+      const response = await server.sendTransaction(tx);
+      status = response.status;
+      errorResult = response.errorResult;
     } catch (error) {
       // Network error or HTTP 429: the transaction may or may not have arrived
       networkErrorSeen = true;
@@ -72,6 +82,13 @@ export async function submitTransaction<Tx>(
 
     if (status === 'PENDING' || status === 'DUPLICATE') {
       return status;
+    }
+    if (status === 'ERROR') {
+      console.error('[sorobanTx] sendTransaction answered ERROR:', errorResult);
+      if (networkErrorSeen) {
+        // An earlier attempt may have been included: let getTransaction decide
+        return 'UNKNOWN';
+      }
     }
     if (status !== null && status !== 'TRY_AGAIN_LATER') {
       throw new SorobanSubmitError('REJECTED');
