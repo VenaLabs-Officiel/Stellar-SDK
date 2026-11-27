@@ -130,6 +130,11 @@ const server = setupServer(
   // GET /progress/:courseId
   http.get(`${BASE_URL}/api/v1/sdk/progress/:courseId`, () => {
     return HttpResponse.json(null, { status: 404 });
+  }),
+
+  // GET /wallet (no wallet linked yet)
+  http.get(`${BASE_URL}/api/v1/sdk/wallet`, () => {
+    return HttpResponse.json({ walletAddresses: {} });
   })
 );
 
@@ -152,7 +157,7 @@ describe('VenalabsStellarSDK', () => {
       expect(document.querySelector('.venalabs-sdk-container')).toBeInTheDocument();
     });
 
-    it('should accept optional lang prop (default: fr)', () => {
+    it('should accept optional lang prop (default: en)', () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -317,7 +322,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -344,7 +349,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -371,7 +376,7 @@ describe('VenalabsStellarSDK', () => {
       });
 
       // Click on course card
-      const courseCard = screen.getByText('Introduction to Web3').closest('button');
+      const courseCard = screen.getByText('Introduction to Web3').closest('.venalabs-course-card');
       if (courseCard) {
         fireEvent.click(courseCard);
       }
@@ -395,7 +400,7 @@ describe('VenalabsStellarSDK', () => {
   });
 
   describe('Internationalization', () => {
-    it('should display content in French by default', async () => {
+    it('should display content in English by default', async () => {
       render(
         <VenalabsStellarSDK
           apiKey="test-key"
@@ -405,7 +410,7 @@ describe('VenalabsStellarSDK', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('Introduction au Web3')).toBeInTheDocument();
+        expect(screen.getByText('Introduction to Web3')).toBeInTheDocument();
       });
     });
 

@@ -56,7 +56,7 @@ export interface VenalabsStellarSDKProps {
    * ```
    */
   getAccessToken: TokenProvider;
-  /** Language for UI (default: "fr") */
+  /** Language for UI (default: "en") */
   lang?: 'fr' | 'en';
   /** Stellar network for wallet operations (default: "TESTNET") */
   stellarNetwork?: StellarNetwork;
