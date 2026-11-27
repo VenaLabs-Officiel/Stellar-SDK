@@ -420,11 +420,12 @@ describe('VenalabsStellarSDK: userKey prop and linked wallets', () => {
     server.use(
       http.get(`${SDK}/maps`, () => HttpResponse.json([map])),
       http.get(`${SDK}/progress`, () => HttpResponse.json([])),
-      // Alice has linked the connected wallet; Bob's wallet request fails
+      // Alice has linked the connected wallet; Bob's wallet request fails, so
+      // nothing overwrites what the SDK holds (404: not retried by the client)
       http.get(`${SDK}/wallet`, ({ request }) =>
         isAlice(request)
           ? HttpResponse.json({ walletAddresses: { STELLAR_TESTNET: USER_ADDRESS } })
-          : HttpResponse.json({ message: 'boom' }, { status: 500 })
+          : HttpResponse.json({ message: 'No wallet' }, { status: 404 })
       ),
       http.get(`${SDK}/courses/${COURSE_ID}`, () => HttpResponse.json(course)),
       http.post(`${SDK}/courses/${COURSE_ID}/start`, () => HttpResponse.json({})),
