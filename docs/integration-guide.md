@@ -132,6 +132,8 @@ With Next.js, render the component from a client component (a file that starts w
 | `className`         | `string`                    | No       | `''`                       | Custom CSS class for the container                      |
 | `baseUrl`           | `string`                    | No       | `https://api.venalabs.com` | API base URL (for testing)                              |
 | `externalWalletKit` | `StellarWalletsKit \| null` | No       | -                          | Existing wallet kit instance                            |
+| `sorobanRpcUrl` | `string` | No | per network | Soroban RPC URL used for NFT minting |
+| `userKey` | `string` | No | - | Identifier of the signed-in user; changing it resets the SDK session |
 
 ## Choosing the network
 

@@ -36,7 +36,7 @@ function App() {
 }
 ```
 
-Keep `getAccessToken` referentially stable (wrap it in `useCallback` or define it outside the component): the SDK creates a new API client whenever the identity of this function changes.
+`getAccessToken` does not need to be referentially stable: the SDK always calls the latest function and keeps its API client and cached token across renders. Passing a new function therefore does not switch users. If your application can change the signed-in user without unmounting the component, pass the `userKey` prop: changing it resets the session.
 
 A step-by-step walkthrough is available in the [integration guide](./docs/integration-guide.md).
 
@@ -214,7 +214,7 @@ The SDK maps the HTTP status returned by the API to one of the error codes below
 | `INVALID_API_KEY`       | The code exists in the SDK and is mapped to HTTP 403. The current API reports an invalid API key with a 401, so that case is reported as `INVALID_TOKEN`                                                            | See `INVALID_TOKEN`                                                                                                                                                                        |
 | `RATE_LIMITED`          | The API answered 429                                                                                                                                                                                                | Reduce the request rate or contact support                                                                                                                                                 |
 | Blank/unstyled screen   | CSS not imported                                                                                                                                                                                                    | Add `import '@venalabs/stellar-sdk/style.css'` to your app                                                                                                                                 |
-| Wallet connection fails | Wrong network                                                                                                                                                                                                       | Ensure `stellarNetwork` matches your wallet's network                                                                                                                                      |
+| Minting is refused because of the network | The wallet is on another network than the course | Switch the wallet to the network of the course (`stellarNetwork`). Linking a wallet only shows a warning; minting is blocked until the networks match |
 
 ## TypeScript Support
 
