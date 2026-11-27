@@ -24,7 +24,7 @@ import {
 } from './GlassCard';
 import { CheckerVerification } from './CheckerVerification';
 import type { VenalabsApiClient } from '../../api';
-import { getSafeHttpUrl, getVideoEmbedUrl } from '../../utils/safeUrl';
+import { getSafeLink, getVideoEmbedUrl } from '../../utils/safeUrl';
 
 // Utility function for class names
 function cn(...classes: (string | boolean | undefined | null)[]): string {
@@ -312,14 +312,23 @@ function InlineRenderer({ item }: { item: InlineItem }): ReactNode {
   if (item.type === 'link') {
     const children = item.content?.map((child, i) => <InlineRenderer key={i} item={child} />);
 
-    // Only absolute http(s) links are rendered as links (no javascript:, data:, ...)
-    const href = getSafeHttpUrl(item.href);
-    if (!href) {
+    // Only http(s), mailto: and tel: links are rendered as links (no javascript:, data:, ...)
+    const link = getSafeLink(item.href);
+    if (!link) {
       return <span>{children}</span>;
     }
 
+    // mailto: and tel: are handled by the system: no new tab for them
+    if (!link.external) {
+      return (
+        <a href={link.href} className="venalabs-link">
+          {children}
+        </a>
+      );
+    }
+
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="venalabs-link">
+      <a href={link.href} target="_blank" rel="noopener noreferrer" className="venalabs-link">
         {children}
       </a>
     );

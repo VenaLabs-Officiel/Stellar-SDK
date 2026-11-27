@@ -76,6 +76,42 @@ describe('Course content: links', () => {
   );
 });
 
+describe('Course content: mailto and tel links', () => {
+  it.each([
+    ['mailto:support@example.com'],
+    ['mailto:a@example.com?subject=Hello'],
+    ['tel:+33123456789'],
+  ])('renders %s as a link that stays in the current tab', (href) => {
+    renderStep(textStepWithLink(href));
+
+    const link = screen.getByRole('link', { name: 'the link' });
+    expect(link).toHaveAttribute('href', href);
+    expect(link).not.toHaveAttribute('target');
+  });
+
+  it.each([
+    ['MAILTO:support@example.com', 'MAILTO:support@example.com'],
+    ['  tel:+33123456789 ', 'tel:+33123456789'],
+  ])('accepts %j whatever its case or surrounding spaces', (href, expected) => {
+    renderStep(textStepWithLink(href));
+
+    expect(screen.getByRole('link', { name: 'the link' })).toHaveAttribute('href', expected);
+  });
+
+  it.each([
+    ['sms:+33123456789'],
+    ['ftp://example.com/file'],
+    ['blob:https://example.com/id'],
+    ['mailto'],
+    ['tel'],
+  ])('still renders %j as plain text', (href) => {
+    renderStep(textStepWithLink(href));
+
+    expect(screen.getByText('the link')).toBeInTheDocument();
+    expect(document.querySelector('a')).not.toBeInTheDocument();
+  });
+});
+
 describe('Course content: video embeds', () => {
   const iframeSrc = () => document.querySelector('iframe')?.getAttribute('src');
 

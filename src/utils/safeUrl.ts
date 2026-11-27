@@ -29,6 +29,42 @@ export function getSafeHttpUrl(value: unknown): string | null {
   return url.protocol === 'http:' || url.protocol === 'https:' ? trimmed : null;
 }
 
+/** A link target that is safe to put in an `href` */
+export interface SafeLink {
+  href: string;
+  /** True for http(s) links, which open in a new tab; false for mailto: and tel: */
+  external: boolean;
+}
+
+/**
+ * Return the link target when it is an absolute http(s) URL, a `mailto:` or a
+ * `tel:` link, null otherwise (javascript:, data:, vbscript:, relative or
+ * malformed URLs, any other scheme).
+ */
+export function getSafeLink(value: unknown): SafeLink | null {
+  const httpUrl = getSafeHttpUrl(value);
+  if (httpUrl) {
+    return { href: httpUrl, external: true };
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  // An address or a number is required: "mailto:" alone is not a link
+  if ((url.protocol === 'mailto:' || url.protocol === 'tel:') && url.pathname !== '') {
+    return { href: trimmed, external: false };
+  }
+  return null;
+}
+
 const YOUTUBE_HOSTS = ['youtube.com', 'youtube-nocookie.com'];
 const YOUTUBE_ID_PATH_PREFIXES = ['embed', 'shorts', 'live', 'v'];
 const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{6,20}$/;
