@@ -41,7 +41,7 @@ describe('i18n', () => {
   it('contains no em dash', () => {
     for (const locale of ['en', 'fr'] as const) {
       for (const text of Object.values(translations[locale])) {
-        expect(text).not.toContain('—');
+        expect(text).not.toContain(String.fromCharCode(0x2014));
       }
     }
   });
